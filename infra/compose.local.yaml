@@ -1,0 +1,85 @@
+# =============================================================================
+# RaspyBank — Sobreposição: DESENVOLVIMENTO (VM Linux)
+# =============================================================================
+# Combinado com compose.yaml. Contém APENAS o que difere do ambiente base.
+#
+#   docker compose -f infra/compose.yaml -f infra/compose.local.yaml up -d
+#
+# Filosofia deste arquivo: conveniência e visibilidade. Aqui pode ter porta
+# exposta, log verboso e ferramenta gráfica — coisas que jamais entram no Pi.
+# =============================================================================
+
+services:
+
+  postgres:
+
+    ports:
+      # Publica a porta do Postgres, mas SOMENTE no loopback da VM (127.0.0.1).
+      #
+      # Escrever apenas "5432:5432" abriria a porta em todas as interfaces de
+      # rede da VM, tornando o banco alcançável pelo Windows e por qualquer
+      # máquina da rede. Prefixar com 127.0.0.1 restringe ao próprio Linux.
+      #
+      # E o Windows ainda alcança: o VS Code Remote encaminha portas pelo túnel
+      # SSH automaticamente. Segurança e conveniência ao mesmo tempo.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+
+    command:
+      # Parâmetros do Postgres úteis só em desenvolvimento.
+      # Passados como argumentos porque assim não precisamos manter um
+      # postgresql.conf próprio.
+      - "postgres"
+
+      # Registra TODAS as instruções SQL executadas.
+      # Extremamente útil para aprender: você vê exatamente qual SQL o
+      # Hibernate está gerando por trás das anotações JPA.
+      # Custa desempenho e enche o log — nunca em produção.
+      - "-c"
+      - "log_statement=all"
+
+      # Registra consultas que demorem mais de 200ms.
+      # Com a decisão P1 (saldo sempre calculado, nunca armazenado), consultas
+      # de agregação são o ponto sensível do sistema. Este parâmetro faz o
+      # problema aparecer cedo, em vez de virar surpresa em produção.
+      - "-c"
+      - "log_min_duration_statement=200"
+
+      # Inclui data, hora e nome do banco em cada linha de log.
+      - "-c"
+      - "log_line_prefix=%m [%p] %q%u@%d "
+
+  # ---------------------------------------------------------------------------
+  # Adminer — cliente web de banco de dados
+  # ---------------------------------------------------------------------------
+  # Serviço OPCIONAL. Só sobe quando o perfil "tools" for solicitado:
+  #
+  #   docker compose ... --profile tools up -d
+  #   (ou simplesmente "make tools")
+  #
+  # É exatamente para isso que servem os perfis do Compose: ligar e desligar
+  # serviços opcionais DENTRO de um ambiente. Não confundir com a separação
+  # entre ambientes, que é feita por arquivos de sobreposição.
+  adminer:
+    profiles:
+      - tools
+
+    # Adminer em vez de pgAdmin: um único arquivo PHP, cerca de 100 MB de RAM
+    # contra 500 MB do pgAdmin. Numa VM de 8 GB isso faz diferença.
+    image: adminer:5
+    container_name: raspybank-adminer
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8081:8080"
+
+    environment:
+      # Já vem preenchido apontando para o nosso banco.
+      ADMINER_DEFAULT_SERVER: postgres
+
+    networks:
+      - raspybank
+
+    depends_on:
+      postgres:
+        # Só sobe depois que o healthcheck do Postgres passar.
+        condition: service_healthy

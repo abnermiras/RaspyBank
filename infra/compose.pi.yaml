@@ -1,0 +1,91 @@
+# =============================================================================
+# RaspyBank — Sobreposição: PRODUÇÃO (Raspberry Pi 4)
+# =============================================================================
+# Combinado com compose.yaml.
+#
+#   docker compose -f infra/compose.yaml -f infra/compose.pi.yaml up -d
+#
+# Filosofia deste arquivo: restrição e durabilidade. Nada de porta exposta,
+# nada de log verboso, nada de ferramenta gráfica. Memória limitada e dados
+# no SSD.
+#
+# ATENÇÃO: este arquivo ainda não foi exercitado — o Pi entra na Fase 9.
+# Ele existe agora para que as diferenças entre ambientes fiquem explícitas
+# desde o início, em vez de serem descobertas na hora do primeiro deploy.
+# =============================================================================
+
+services:
+
+  postgres:
+
+    # NENHUMA porta publicada. O banco é alcançável apenas pelos containers
+    # da rede "raspybank". Nem a rede doméstica nem a internet o enxergam.
+    # Para acesso administrativo, usa-se túnel SSH até o Pi.
+
+    # Memória compartilhada. O padrão do Docker é 64 MB, insuficiente para
+    # consultas com ordenação ou junção mais pesada — o Postgres falha com
+    # "could not resize shared memory segment". Num Pi de 4 GB, 256 MB é
+    # um valor conservador e adequado.
+    shm_size: 256mb
+
+    deploy:
+      resources:
+        limits:
+          # Teto de memória. Sem limite, uma consulta ruim pode consumir a
+          # RAM do Pi inteiro e fazer o kernel matar processos ao acaso —
+          # inclusive o próprio banco, no meio de uma escrita.
+          memory: 1g
+        reservations:
+          memory: 512m
+
+    command:
+      - "postgres"
+      # Parâmetros dimensionados para um Pi 4. Nada de log de instruções.
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=1GB"
+      - "-c"
+      - "work_mem=8MB"
+      - "-c"
+      - "maintenance_work_mem=64MB"
+      # Máximo de conexões simultâneas. O padrão é 100, muito acima do que um
+      # sistema pessoal usa, e cada conexão custa memória.
+      - "-c"
+      - "max_connections=30"
+      # Registra apenas consultas realmente lentas.
+      - "-c"
+      - "log_min_duration_statement=1000"
+
+    logging:
+      # Sem isto, o arquivo de log cresce indefinidamente até encher o disco.
+      # Em servidor que fica meses ligado, isso não é hipótese — é questão
+      # de tempo.
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# -----------------------------------------------------------------------------
+# Volumes — onde os dados moram fisicamente no Pi
+# -----------------------------------------------------------------------------
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      # Aponta o volume nomeado para uma pasta específica do disco.
+      #
+      # POR QUE ISSO É NECESSÁRIO: por padrão, volumes do Docker vivem em
+      # /var/lib/docker, que no Raspberry Pi fica no CARTÃO SD. Banco de dados
+      # grava constantemente, e cartão SD tem número limitado de ciclos de
+      # escrita — ele morre, sem aviso, levando os dados junto.
+      #
+      # Esta configuração mantém o nome lógico do volume (o compose.yaml não
+      # precisa saber de nada) e move o armazenamento físico para o SSD.
+      #
+      # PRÉ-REQUISITO no Pi, antes do primeiro "up":
+      #   sudo mkdir -p /mnt/ssd/raspybank/postgres
+      #   (com o SSD montado em /mnt/ssd via /etc/fstab)
+      type: none
+      o: bind
+      device: /mnt/ssd/raspybank/postgres

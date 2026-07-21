@@ -1,0 +1,128 @@
+# =============================================================================
+# RaspyBank — Compose BASE
+# =============================================================================
+# Este arquivo descreve o que é verdade em TODOS os ambientes.
+# Ele NUNCA é usado sozinho: sempre combinado com um arquivo de sobreposição.
+#
+#   Desenvolvimento:  docker compose -f infra/compose.yaml -f infra/compose.local.yaml up -d
+#   Raspberry Pi:     docker compose -f infra/compose.yaml -f infra/compose.pi.yaml   up -d
+#
+# O Compose mescla os arquivos na ordem informada — o último vence em caso de
+# conflito. Por isso o que muda entre ambientes fica nos arquivos de sobreposição,
+# e o que é comum fica aqui. Assim uma correção feita aqui vale para todo lugar.
+# =============================================================================
+
+# Nome do projeto. Define o prefixo de containers, redes e volumes.
+# Fixar aqui garante que o nome não mude conforme a pasta de onde você executa.
+name: raspybank
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Banco de dados
+  # ---------------------------------------------------------------------------
+  postgres:
+
+    # Versão FIXADA, com major e minor. Nunca use "latest" nem só "postgres:18".
+    # Motivo: a VM (amd64) e o Raspberry Pi (arm64) precisam rodar exatamente a
+    # mesma versão. Com "latest", cada máquina baixa o que estiver publicado no
+    # dia — e você descobre a diferença em produção, com dados reais dentro.
+    #
+    # Não usamos a variante "alpine": ela tem suporte reduzido a locales, o que
+    # afeta ordenação de texto acentuado (português). A imagem padrão é baseada
+    # em Debian e trata isso corretamente.
+    image: postgres:18.4
+
+    # Nome fixo do container, para os comandos do Makefile não dependerem
+    # do índice numérico que o Compose geraria.
+    container_name: raspybank-postgres
+
+    # Reinicia sozinho se o container cair ou se a máquina reiniciar.
+    # "unless-stopped" respeita uma parada manual — se você der "stop",
+    # ele não volta sozinho no próximo boot.
+    restart: unless-stopped
+
+    environment:
+      # --- Credenciais do dono do banco -------------------------------------
+      # Este usuário é o PROPRIETÁRIO. É ele que executa as migrações do Flyway,
+      # porque só o dono pode alterar a estrutura das tabelas.
+      # A aplicação em execução NÃO usa este usuário — veja o script de init.
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # --- Credenciais do usuário de aplicação ------------------------------
+      # Lidas pelo script em postgres/init/ na PRIMEIRA inicialização.
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+
+      # --- Configuração do cluster ------------------------------------------
+      # Aplicado apenas na criação inicial do banco.
+      # C.UTF-8 dá ordenação previsível e estável entre versões do Postgres.
+      # Ordenação sensível a idioma será resolvida na consulta, com COLLATE,
+      # onde e quando fizer falta.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+
+      # Fuso do container. O banco armazena timestamps em UTC (decisão de
+      # arquitetura); isto afeta apenas a exibição em ferramentas e logs.
+      TZ: ${TZ:-America/Sao_Paulo}
+
+      # Caminho dos dados DENTRO do volume montado.
+      # Apontar para uma SUBPASTA do ponto de montagem é a prática recomendada:
+      # evita conflito com arquivos de controle que o Docker cria na raiz do
+      # volume e mantém o comportamento estável entre versões maiores da imagem.
+      PGDATA: /var/lib/postgresql/data/pgdata
+
+    volumes:
+      # Volume NOMEADO para os dados. Nunca uma pasta do host diretamente:
+      # volume nomeado evita problemas de permissão e desempenho, e sobrevive
+      # a "docker compose down" (só some com "down -v").
+      - postgres_data:/var/lib/postgresql/data
+
+      # Scripts de inicialização. O Postgres executa tudo o que estiver aqui
+      # UMA ÚNICA VEZ: na primeira subida, com o volume ainda vazio.
+      # Se você alterar estes scripts depois, precisa destruir o volume para
+      # que rodem de novo (comando "make db-reset").
+      # ":ro" monta como somente leitura — o container não deve alterá-los.
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+
+    healthcheck:
+      # O Docker considera o serviço "saudável" apenas quando este comando
+      # retorna sucesso. Importante porque o Postgres leva alguns segundos
+      # entre iniciar o processo e aceitar conexões — e o backend vai depender
+      # deste estado para saber quando pode subir.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # Janela de tolerância inicial: falhas aqui não contam como erro.
+      # Generosa por causa do Raspberry Pi, que é bem mais lento na primeira
+      # subida (criação do cluster).
+      start_period: 60s
+
+    networks:
+      - raspybank
+
+    # NENHUMA porta é publicada aqui de propósito.
+    # Publicar porta é decisão de ambiente: em desenvolvimento queremos acesso
+    # a partir da VM; no Pi o banco deve ficar inacessível de fora.
+    # Veja os arquivos de sobreposição.
+
+# -----------------------------------------------------------------------------
+# Volumes
+# -----------------------------------------------------------------------------
+volumes:
+  postgres_data:
+    # Sem configuração aqui: cada ambiente define onde os dados moram fisicamente.
+    # Em desenvolvimento, o padrão do Docker basta.
+    # No Pi, o arquivo de sobreposição aponta este mesmo volume para o SSD.
+
+# -----------------------------------------------------------------------------
+# Redes
+# -----------------------------------------------------------------------------
+networks:
+  raspybank:
+    driver: bridge
+    # Rede própria e isolada. Containers dentro dela se enxergam pelo NOME
+    # do serviço — o backend vai conectar em "postgres:5432", não em endereço IP.
+    # Essa é a razão de o backend não precisar saber nada sobre a rede do host.

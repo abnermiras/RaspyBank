@@ -1,0 +1,94 @@
+# =============================================================================
+# RaspyBank — .gitignore
+# =============================================================================
+# Escrito ANTES de qualquer código, de propósito.
+#
+# Motivo: uma vez que um segredo entra em um commit, apagá-lo do arquivo não
+# resolve — ele continua no histórico, e em repositório público isso significa
+# exposto para sempre. A única resposta correta passa a ser rotacionar a
+# credencial, não editar o arquivo.
+#
+# Este arquivo é a primeira linha de defesa. O secret scanning do GitHub é a
+# segunda, e reconhece apenas padrões de provedores conhecidos — senha de
+# Postgres e segredo de JWT passam batido por ele.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SEGREDOS — a seção que realmente importa
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+*.key
+*.pem
+*.p12
+*.jks
+*.keystore
+*.crt
+secrets/
+**/application-local.yml
+**/application-local.yaml
+**/application-secret*
+
+# -----------------------------------------------------------------------------
+# Java / Maven
+# -----------------------------------------------------------------------------
+target/
+*.jar
+*.war
+*.class
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+dependency-reduced-pom.xml
+
+# -----------------------------------------------------------------------------
+# Node / frontend
+# -----------------------------------------------------------------------------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# -----------------------------------------------------------------------------
+# IDEs e editores
+# -----------------------------------------------------------------------------
+.idea/
+*.iml
+*.iws
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.settings/
+.project
+.classpath
+*.swp
+*~
+
+# -----------------------------------------------------------------------------
+# Sistema operacional
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -----------------------------------------------------------------------------
+# Logs e temporários
+# -----------------------------------------------------------------------------
+*.log
+logs/
+tmp/
+temp/
+
+# -----------------------------------------------------------------------------
+# Dados de banco
+# -----------------------------------------------------------------------------
+# Os dados vivem em volume Docker, fora do repositório. Estas entradas existem
+# para o caso de alguém gerar um dump dentro da pasta do projeto por engano.
+*.sql.gz
+*.dump
+pgdata/
