@@ -1,0 +1,138 @@
+# -----------------------------------------------------------------------------
+# RaspyBank — Configuração da aplicação
+# -----------------------------------------------------------------------------
+# Nenhuma senha aqui. Todo valor sensível vem de variável de ambiente, com a
+# sintaxe ${NOME_DA_VARIAVEL}. Sem valor padrão, de propósito: se a variável
+# não existir, a aplicação recusa-se a subir, em vez de silenciosamente usar
+# uma credencial de exemplo.
+# -----------------------------------------------------------------------------
+spring:
+  application:
+    name: raspybank
+
+  # ---------------------------------------------------------------------------
+  # Conexão da APLICAÇÃO — usuário restrito
+  # ---------------------------------------------------------------------------
+  # Este é o usuário sujeito ao Row Level Security. Ele lê e grava dados,
+  # mas não altera a estrutura do banco.
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${POSTGRES_DB}
+    username: ${APP_DB_USER}
+    password: ${APP_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # Pool pequeno de propósito. O Raspberry Pi tem max_connections em 30, e
+      # cada conexão ociosa consome memória dos dois lados.
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 20000
+      # Nome que aparece no pg_stat_activity — facilita descobrir de onde vem
+      # uma consulta lenta.
+      pool-name: raspybank-pool
+
+  jpa:
+    # A estrutura do banco é criada e alterada EXCLUSIVAMENTE pelo Flyway.
+    # "validate" faz o Hibernate conferir, na inicialização, se as entidades
+    # batem com as tabelas — e falhar se não baterem.
+    #
+    # NUNCA use "update" aqui. Ele altera o banco automaticamente conforme as
+    # anotações, sem versionamento, sem revisão e sem registro. É a forma mais
+    # rápida de perder o controle do esquema.
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        # Formato de data e hora sem conversão de fuso pelo driver.
+        # O banco guarda em UTC; a conversão acontece na apresentação.
+        jdbc:
+          time_zone: UTC
+        # Em produção isto fica desligado por perfil (ver mais abaixo).
+        format_sql: true
+    open-in-view: false
+    # open-in-view desligado de propósito: com ele ligado, a sessão do
+    # Hibernate fica aberta até a resposta HTTP ser escrita, o que faz consultas
+    # dispararem durante a serialização JSON, fora de qualquer transação — e,
+    # portanto, sem o contexto de RLS definido.
+
+  # ---------------------------------------------------------------------------
+  # Conexão das MIGRAÇÕES — usuário proprietário
+  # ---------------------------------------------------------------------------
+  # O Flyway cria e altera tabelas, o que exige o usuário dono do banco.
+  # É a única parte da aplicação que usa essas credenciais.
+  flyway:
+    enabled: true
+    user: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    locations: classpath:db/migration
+    # Recusa-se a rodar sobre um banco que já tenha tabelas sem histórico de
+    # migração. Evita a situação em que o Flyway assume um banco alheio.
+    baseline-on-migrate: false
+    # Confere a soma de verificação de cada migração já aplicada. Se alguém
+    # editar um arquivo antigo, a aplicação não sobe.
+    validate-on-migrate: true
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    # Não expõe a pilha de exceções na resposta HTTP.
+    include-stacktrace: never
+    include-message: always
+
+# -----------------------------------------------------------------------------
+# Endpoints de saúde e métricas
+# -----------------------------------------------------------------------------
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+  health:
+    db:
+      enabled: true
+
+# -----------------------------------------------------------------------------
+# Documentação da API
+# -----------------------------------------------------------------------------
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    root: INFO
+    com.raspybank: DEBUG
+    # Mostra o SQL gerado pelo Hibernate. Ligado durante o aprendizado,
+    # para que a tradução entre anotação JPA e SQL fique visível.
+    org.hibernate.SQL: DEBUG
+    # Descomente para ver também os valores dos parâmetros.
+    # CUIDADO: isso registra dados financeiros em texto no log.
+    # org.hibernate.orm.jdbc.bind: TRACE
+
+---
+# =============================================================================
+# Perfil "pi" — Raspberry Pi
+# =============================================================================
+# Ativado com SPRING_PROFILES_ACTIVE=pi
+spring:
+  config:
+    activate:
+      on-profile: pi
+  jpa:
+    properties:
+      hibernate:
+        format_sql: false
+  datasource:
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+
+logging:
+  level:
+    root: WARN
+    com.raspybank: INFO
+    org.hibernate.SQL: WARN

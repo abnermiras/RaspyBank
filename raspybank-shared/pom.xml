@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  raspybank-shared
+  ==========
+  Contratos e tipos usados por TODOS os contextos: contexto da requisição
+  (quem é o usuário, qual o ambiente, por qual canal), tipo base de evento
+  de domínio e utilitários de persistência.
+
+  REGRA: este módulo não pode conhecer nenhum contexto de negócio.
+  Se algo aqui precisar saber o que é uma Fatura, está no lugar errado.
+  Ele é a base da pirâmide — tudo depende dele, ele não depende de nada.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.raspybank</groupId>
+        <artifactId>raspybank</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>raspybank-shared</artifactId>
+    <name>RaspyBank :: Shared</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+    </dependencies>
+</project>

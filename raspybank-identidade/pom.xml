@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  raspybank-identidade  —  Módulo M1
+  ==========
+  Usuário, autenticação e credenciais.
+
+  REGRA: não pode depender de raspybank-ambiente, raspybank-auditoria nem de
+  nenhum outro contexto. Se precisar reagir a algo que aconteceu em outro
+  contexto, é por evento.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.raspybank</groupId>
+        <artifactId>raspybank</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>raspybank-identidade</artifactId>
+    <name>RaspyBank :: Identidade</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.raspybank</groupId>
+            <artifactId>raspybank-shared</artifactId>
+        </dependency>
+    </dependencies>
+</project>

@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+  raspybank-app  —  Módulo de montagem
+  ============================================================================
+  Este é o ÚNICO módulo que conhece todos os outros. Ele:
+
+    - Sobe o Spring Boot
+    - Guarda as migrações do Flyway (o esquema é do sistema, não de um contexto)
+    - Concentra a configuração de segurança, JSON e documentação da API
+    - Gera o jar executável
+
+  Nenhum módulo de contexto depende deste. A seta aponta sempre para cá,
+  nunca daqui para fora — é o que permite compilar e testar cada contexto
+  isoladamente.
+  ============================================================================
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.raspybank</groupId>
+        <artifactId>raspybank</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>raspybank-app</artifactId>
+    <name>RaspyBank :: App</name>
+
+    <dependencies>
+
+        <!-- Todos os contextos -->
+        <dependency>
+            <groupId>com.raspybank</groupId>
+            <artifactId>raspybank-shared</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.raspybank</groupId>
+            <artifactId>raspybank-identidade</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.raspybank</groupId>
+            <artifactId>raspybank-ambiente</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.raspybank</groupId>
+            <artifactId>raspybank-auditoria</artifactId>
+        </dependency>
+
+        <!-- Servidor web embutido e camada REST -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- Validação de dados de entrada (@NotNull, @Size...) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- Endpoints de saúde e métricas -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Driver do Postgres. runtime: usado só em execução, não na compilação -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Flyway. Desde a versão 10 o suporte a cada banco é um artefato
+             separado — sem o segundo, o Flyway não reconhece o Postgres. -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
+        <!-- Documentação automática da API (Swagger UI) -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        </dependency>
+
+        <!-- ArchUnit: os testes que policiam as fronteiras entre módulos -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- Gera um jar executável com todas as dependências dentro -->
+                    <mainClass>com.raspybank.app.RaspyBankApplication</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

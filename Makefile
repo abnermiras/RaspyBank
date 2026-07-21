@@ -22,7 +22,7 @@ COMPOSE_PI    = docker compose --env-file .env -f infra/compose.yaml -f infra/co
 -include .env
 
 .DEFAULT_GOAL := help
-.PHONY: help up down restart logs ps psql db-reset tools tools-down check-env
+.PHONY: help up down restart logs ps psql psql-app db-reset db-dump tools tools-down check-env build test arch app gate diag
 
 # -----------------------------------------------------------------------------
 help:  ## Lista os alvos disponíveis
@@ -87,3 +87,43 @@ tools: check-env  ## Sobe o Adminer (cliente web) em 127.0.0.1:8081
 
 tools-down:  ## Derruba o Adminer
 	$(COMPOSE_LOCAL) --profile tools stop adminer
+
+# -----------------------------------------------------------------------------
+# Aplicação
+# -----------------------------------------------------------------------------
+# As variáveis do .env precisam virar variáveis de AMBIENTE para o Spring Boot
+# enxergá-las. "set -a" faz toda variável definida a seguir ser exportada
+# automaticamente; "set +a" desliga esse comportamento.
+
+build:  ## Compila tudo e roda os testes (inclui os de arquitetura)
+	mvn -B clean install
+
+test:  ## Roda apenas os testes
+	mvn -B test
+
+arch:  ## Roda somente os testes de fronteira entre módulos
+	mvn -B -pl raspybank-app test -Dtest=ArquiteturaTest
+
+app: check-env  ## Sobe o backend na VM, com recarga rápida
+	set -a; . ./.env; set +a; \
+	mvn -B -pl raspybank-app spring-boot:run
+
+# -----------------------------------------------------------------------------
+# Portão — antes de dar uma feature por pronta
+# -----------------------------------------------------------------------------
+gate: check-env  ## Constrói a imagem real e sobe. Se passar aqui, passa no Pi.
+	docker build -t raspybank:local .
+	set -a; . ./.env; set +a; \
+	docker run --rm -it \
+		--network raspybank_raspybank \
+		-e DB_HOST=postgres \
+		-e POSTGRES_DB=$$POSTGRES_DB \
+		-e POSTGRES_USER=$$POSTGRES_USER \
+		-e POSTGRES_PASSWORD=$$POSTGRES_PASSWORD \
+		-e APP_DB_USER=$$APP_DB_USER \
+		-e APP_DB_PASSWORD=$$APP_DB_PASSWORD \
+		-p 127.0.0.1:8080:8080 \
+		raspybank:local
+
+diag:  ## Consulta o endpoint de diagnóstico
+	@curl -s http://localhost:8080/api/diagnostico | python3 -m json.tool

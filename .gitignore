@@ -18,7 +18,7 @@
 # -----------------------------------------------------------------------------
 .env
 .env.*
-!.env.example
+!.env.example          # exceção: o modelo com valores fictícios é versionado
 
 *.key
 *.pem
@@ -61,8 +61,8 @@ pnpm-debug.log*
 *.iml
 *.iws
 .vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
+!.vscode/extensions.json    # recomendações de extensão são úteis ao time
+!.vscode/settings.json      # configurações do projeto, sem segredo
 .settings/
 .project
 .classpath

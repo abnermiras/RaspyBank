@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  raspybank-ambiente  —  Módulo M2
+  ==========
+  Ambiente Financeiro e o vínculo entre usuários e ambientes.
+  É a fronteira de dados do sistema inteiro (princípio P4).
+
+  Note que este módulo NÃO depende de raspybank-identidade, embora referencie
+  usuários. Ele guarda o identificador do usuário, não a entidade. Contextos
+  se referenciam por identificador, nunca por objeto — é o que permite que um
+  deles seja extraído para outro processo sem quebrar o outro.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.raspybank</groupId>
+        <artifactId>raspybank</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>raspybank-ambiente</artifactId>
+    <name>RaspyBank :: Ambiente</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.raspybank</groupId>
+            <artifactId>raspybank-shared</artifactId>
+        </dependency>
+    </dependencies>
+</project>

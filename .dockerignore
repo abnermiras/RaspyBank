@@ -1,0 +1,13 @@
+# Nada aqui precisa entrar na imagem, e tudo isso a deixaria maior
+# ou vazaria informação.
+.git
+.gitignore
+.env
+.env.*
+target/
+**/target/
+backups/
+infra/
+*.md
+.vscode/
+.idea/

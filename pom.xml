@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+  RaspyBank — POM PAI
+  ============================================================================
+  Este arquivo não gera artefato executável. Ele existe para três coisas:
+
+    1. Declarar quais módulos compõem o projeto
+    2. Centralizar versões de dependências, para que todos os módulos usem
+       exatamente as mesmas
+    3. Definir configuração de compilação comum
+
+  Os módulos são organizados por CONTEXTO DE NEGÓCIO, não por camada técnica.
+  Cada módulo de contexto tem suas próprias camadas internas (entidade,
+  repositório, serviço, controlador). Ver decisão #03.
+  ============================================================================
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      Herdamos do POM do Spring Boot. Ele traz uma lista enorme de versões
+      compatíveis entre si (o "BOM"): quando declaramos uma dependência do
+      ecossistema Spring, não precisamos informar a versão — ela vem daqui,
+      já testada em conjunto.
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.0</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.raspybank</groupId>
+    <artifactId>raspybank</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>   <!-- "pom" = agregador, não gera jar -->
+
+    <name>RaspyBank</name>
+    <description>Sistema de controle financeiro pessoal</description>
+
+    <!--
+      ORDEM DOS MÓDULOS
+      O Maven resolve a ordem de compilação sozinho, a partir das dependências
+      declaradas. A ordem aqui é apenas para leitura humana: do mais genérico
+      ao mais específico.
+    -->
+    <modules>
+        <module>raspybank-shared</module>
+        <module>raspybank-identidade</module>
+        <module>raspybank-ambiente</module>
+        <module>raspybank-auditoria</module>
+        <module>raspybank-app</module>
+    </modules>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Versões que não vêm do BOM do Spring Boot -->
+        <archunit.version>1.3.0</archunit.version>
+        <springdoc.version>2.6.0</springdoc.version>
+    </properties>
+
+    <!--
+      dependencyManagement declara versões SEM adicionar a dependência.
+      Os módulos filhos declaram a dependência sem versão, e ela vem daqui.
+      Isso garante que todo o projeto use a mesma versão de tudo.
+    -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.raspybank</groupId>
+                <artifactId>raspybank-shared</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.raspybank</groupId>
+                <artifactId>raspybank-identidade</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.raspybank</groupId>
+                <artifactId>raspybank-ambiente</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.raspybank</groupId>
+                <artifactId>raspybank-auditoria</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.tngtech.archunit</groupId>
+                <artifactId>archunit-junit5</artifactId>
+                <version>${archunit.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>${springdoc.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <!--
+      Dependências que TODO módulo recebe automaticamente.
+      Mantemos a lista curtíssima de propósito: dependência global vira
+      acoplamento global.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <compilerArgs>
+                            <!--
+                              Preserva o nome dos parâmetros no bytecode.
+                              Sem isso, Spring e Jackson precisam de anotações
+                              redundantes para saber o nome de cada parâmetro.
+                            -->
+                            <arg>-parameters</arg>
+                        </compilerArgs>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+</project>
