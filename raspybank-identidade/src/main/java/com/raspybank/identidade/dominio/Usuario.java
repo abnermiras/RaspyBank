@@ -5,6 +5,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -61,11 +63,16 @@ public class Usuario {
 
     /**
      * Valores em MAIUSCULAS por convencao fechada na Fase 2 e aplicada pela
-     * migracao V8. O CHECK do banco aceita apenas ATIVO e INATIVO — minusculo
-     * seria recusado.
+     * migracao V8. O CHECK do banco aceita apenas ATIVO e INATIVO.
+     *
+     * <p>STRING manda o JPA gravar o name() do enum como texto — que e
+     * identico ao valor do CHECK ck_usuario_status, por construcao.
+     * NUNCA ORDINAL: gravaria 0,1... e reordenar o enum corromperia
+     * silenciosamente os dados existentes.</p>
      */
     @Column(name = "status", nullable = false)
-    private String status = "ATIVO";
+    @Enumerated(EnumType.STRING)
+    private StatusUsuario status = StatusUsuario.ATIVO;
 
     @Column(name = "criado_em", insertable = false, updatable = false)
     private OffsetDateTime criadoEm;
@@ -91,7 +98,7 @@ public class Usuario {
     public String getNome()                 { return nome; }
     public String getEmail()                { return email; }
     public String getTelegramId()           { return telegramId; }
-    public String getStatus()               { return status; }
+    public StatusUsuario  getStatus()       { return status; }
     public OffsetDateTime getCriadoEm()     { return criadoEm; }
     public OffsetDateTime getAtualizadoEm() { return atualizadoEm; }
 

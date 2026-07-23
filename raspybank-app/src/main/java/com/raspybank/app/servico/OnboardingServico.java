@@ -5,6 +5,8 @@ import com.raspybank.auditoria.servico.AuditoriaServico;
 import com.raspybank.identidade.servico.AutenticacaoServico;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.raspybank.shared.contexto.Canal;
+import com.raspybank.shared.contexto.Operacao;
 
 import java.util.UUID;
 
@@ -62,7 +64,7 @@ public class OnboardingServico {
             usuarioId, "Financas de " + primeiroNome(nome));
 
         auditoria.registrarAutenticacao(
-            usuarioId, "WEB", "CRIACAO",
+            usuarioId, Canal.WEB, Operacao.CRIACAO,
             "{\"evento\":\"cadastro\",\"ambienteInicial\":\"" + ambienteId + "\"}");
 
         return new Resultado(usuarioId, ambienteId);

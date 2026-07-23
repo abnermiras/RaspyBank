@@ -1,9 +1,12 @@
 package com.raspybank.identidade.servico;
 
+import com.raspybank.identidade.dominio.StatusUsuario;
 import com.raspybank.identidade.dominio.TokenRenovacao;
 import com.raspybank.identidade.repositorio.TokenRenovacaoRepositorio;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +30,15 @@ public class AutenticacaoServico {
 
     private static final int DIAS_RENOVACAO = 30;
     private static final int DIAS_TETO      = 90;
+
+    /**
+     * Logger para diferenciar as causas de falha de login — pendencia do
+     * Bloco A. Os tres caminhos (e-mail inexistente, senha errada, status
+     * inativo) geram logs distintos em nivel DEBUG, mas a RESPOSTA ao
+     * cliente e identica nos tres: Optional vazio. O log e para nos;
+     * a uniformidade externa e contra enumeracao de cadastros.
+     */
+    private static final Logger log = LoggerFactory.getLogger(AutenticacaoServico.class);
 
     private final TokenRenovacaoRepositorio tokens;
     private final PasswordEncoder codificador;
@@ -96,18 +108,30 @@ public class AutenticacaoServico {
 
         if (linhas.isEmpty()) {
             gastarTempoEquivalente(senha);
+            // Sem e-mail no log: UUID nao existe neste ramo e endereco de
+            // e-mail e dado pessoal que nao deve se espalhar por arquivos
+            // de log. A ocorrencia em si ja e o sinal util.
+            log.debug("Falha de login: e-mail nao cadastrado.");
             return Optional.empty();
         }
 
         Object[] linha = linhas.get(0);
-        UUID id       = (UUID) linha[0];
-        String hash   = (String) linha[1];
-        String status = (String) linha[2];
+        UUID id     = (UUID) linha[0];
+        String hash = (String) linha[1];
+
+        // Conversao texto -> enum na BORDA, uma unica vez (contrato do
+        // Bloco A). Daqui em diante so o enum circula. Se o banco devolver
+        // valor fora do CHECK (impossivel por construcao, mas dados ja
+        // estiveram errados antes da V8), valueOf explode com erro claro
+        // em vez de falhar silenciosamente numa comparacao de texto.
+        StatusUsuario status = StatusUsuario.valueOf((String) linha[2]);
 
         if (!codificador.matches(senha, hash)) {
+            log.debug("Falha de login: senha incorreta para usuario {}.", id);
             return Optional.empty();
         }
-        if (!"ATIVO".equals(status)) {
+        if (status != StatusUsuario.ATIVO) {
+            log.debug("Falha de login: usuario {} com status {}.", id, status);
             return Optional.empty();
         }
         return Optional.of(id);

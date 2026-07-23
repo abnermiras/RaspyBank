@@ -14,6 +14,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.raspybank.shared.contexto.Canal;
+import com.raspybank.shared.contexto.ContextoRequisicao;
+import com.raspybank.shared.contexto.Operacao;
 
 import java.util.List;
 import java.util.Map;
@@ -82,7 +85,7 @@ public class AutenticacaoControlador {
             usuarioId, requisicao.getHeader("User-Agent"));
 
         auditoria.registrarAutenticacao(
-            usuarioId, "WEB", "CRIACAO", "{\"evento\":\"login\"}");
+            usuarioId, Canal.WEB, Operacao.ACESSO, "{\"evento\":\"login\"}");
 
         return ResponseEntity.ok(Map.of(
             "tokenAcesso",    acesso,

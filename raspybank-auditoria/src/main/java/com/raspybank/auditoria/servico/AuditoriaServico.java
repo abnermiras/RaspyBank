@@ -2,6 +2,8 @@ package com.raspybank.auditoria.servico;
 
 import com.raspybank.auditoria.dominio.RegistroAuditoria;
 import com.raspybank.auditoria.repositorio.RegistroAuditoriaRepositorio;
+import com.raspybank.shared.contexto.Canal;
+import com.raspybank.shared.contexto.Operacao;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
@@ -16,6 +18,15 @@ import java.util.UUID;
  * <p>A escrita acontece na MESMA transacao da operacao auditada. Isso e
  * proposital: se a operacao for desfeita, a auditoria e desfeita junto. Nao
  * queremos registro de algo que nao aconteceu.</p>
+ *
+ * <p><b>Contrato do Bloco A (23/07/2026):</b> as assinaturas publicas exigem
+ * os enums {@link Canal} e {@link Operacao} — literal de texto nao compila
+ * mais. Este servico e o UNICO ponto do sistema onde enum vira texto
+ * (via {@code name()}), na borda com o banco. A entidade e a funcao SQL
+ * continuam recebendo texto porque as colunas sao {@code text} com CHECK;
+ * como {@code name()} e identico ao valor do CHECK por construcao, a
+ * gravacao correta e garantida pelo compilador + convencao, nao por
+ * disciplina de quem chama.</p>
  */
 @Service
 public class AuditoriaServico {
@@ -30,13 +41,14 @@ public class AuditoriaServico {
     }
 
     @Transactional
-    public void registrar(UUID ambienteId, UUID usuarioId, String canal,
-                          String entidade, UUID entidadeId, String operacao,
+    public void registrar(UUID ambienteId, UUID usuarioId, Canal canal,
+                          String entidade, UUID entidadeId, Operacao operacao,
                           String estadoAnterior, String estadoNovo) {
 
+        // Conversao enum -> texto acontece AQUI, e somente aqui.
         repositorio.save(new RegistroAuditoria(
-            ambienteId, usuarioId, canal, entidade, entidadeId,
-            operacao, estadoAnterior, estadoNovo));
+            ambienteId, usuarioId, canal.name(), entidade, entidadeId,
+            operacao.name(), estadoAnterior, estadoNovo));
     }
 
     /**
@@ -52,14 +64,14 @@ public class AuditoriaServico {
      * auditar.</p>
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void registrarAutenticacao(UUID usuarioId, String canal,
-                                      String operacao, String detalhe) {
+    public void registrarAutenticacao(UUID usuarioId, Canal canal,
+                                      Operacao operacao, String detalhe) {
 
         em.createNativeQuery(
                 "SELECT auth_registrar_evento(:usuario, :canal, :operacao, CAST(:detalhe AS jsonb))")
             .setParameter("usuario", usuarioId)
-            .setParameter("canal", canal)
-            .setParameter("operacao", operacao)
+            .setParameter("canal", canal.name())
+            .setParameter("operacao", operacao.name())
             .setParameter("detalhe", detalhe)
             .getSingleResult();
     }

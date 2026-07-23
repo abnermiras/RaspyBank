@@ -37,7 +37,7 @@ public class PerfilControlador {
 
         resposta.put("usuarioId", ContextoRequisicao.usuarioId().orElse(null));
         resposta.put("ambienteAtual", ContextoRequisicao.ambienteId().orElse(null));
-        resposta.put("canal", ContextoRequisicao.canal().valorBanco());
+        resposta.put("canal", ContextoRequisicao.canal().name());
 
         List<Map<String, Object>> lista = ambientes.listarDoUsuario().stream()
             .map(this::resumir)
