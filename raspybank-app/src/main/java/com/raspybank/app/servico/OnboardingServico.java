@@ -62,7 +62,7 @@ public class OnboardingServico {
             usuarioId, "Financas de " + primeiroNome(nome));
 
         auditoria.registrarAutenticacao(
-            usuarioId, "web", "criacao",
+            usuarioId, "WEB", "CRIACAO",
             "{\"evento\":\"cadastro\",\"ambienteInicial\":\"" + ambienteId + "\"}");
 
         return new Resultado(usuarioId, ambienteId);

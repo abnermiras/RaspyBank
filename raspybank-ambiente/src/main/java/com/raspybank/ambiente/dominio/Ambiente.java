@@ -33,7 +33,7 @@ public class Ambiente {
     private String nome;
 
     @Column(name = "status", nullable = false)
-    private String status = "ativo";
+    private String status = "ATIVO";
 
     @Column(name = "criado_em", insertable = false, updatable = false)
     private OffsetDateTime criadoEm;

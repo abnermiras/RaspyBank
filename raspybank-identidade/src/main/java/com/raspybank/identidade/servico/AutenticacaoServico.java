@@ -107,7 +107,7 @@ public class AutenticacaoServico {
         if (!codificador.matches(senha, hash)) {
             return Optional.empty();
         }
-        if (!"ativo".equals(status)) {
+        if (!"ATIVO".equals(status)) {
             return Optional.empty();
         }
         return Optional.of(id);

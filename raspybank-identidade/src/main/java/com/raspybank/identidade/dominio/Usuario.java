@@ -16,6 +16,17 @@ import java.util.UUID;
  * uma colecao de ambientes: o vinculo mora no modulo de ambiente. Contextos se
  * referenciam por identificador, nunca por objeto — e o que permite extrair um
  * deles para outro processo sem quebrar o outro.</p>
+ *
+ * <p><b>Esta entidade NAO mapeia a coluna senha_hash, e isso e deliberado.</b>
+ * A migracao V8 removeu o privilegio de leitura dessa coluna do usuario de
+ * banco da aplicacao. Mapear o campo aqui faria o Hibernate inclui-lo em todo
+ * SELECT, e qualquer findById passaria a falhar com permissao negada.</p>
+ *
+ * <p>O hash e lido e gravado exclusivamente pelas funcoes SECURITY DEFINER
+ * {@code auth_buscar_credenciais} e {@code auth_cadastrar_usuario}, que
+ * executam com privilegios do proprietario do banco. Se um dia for preciso
+ * trocar a senha, o caminho e uma funcao nova no mesmo padrao — nunca
+ * remapear o campo.</p>
  */
 @Entity
 @Table(name = "usuario")
@@ -44,16 +55,17 @@ public class Usuario {
     @Column(name = "email", nullable = false)
     private String email;
 
-    /** Hash da senha. Nunca a senha em texto. */
-    @Column(name = "senha_hash", nullable = false)
-    private String senhaHash;
-
     /** Opcional — RF-M1-01. */
     @Column(name = "telegram_id")
     private String telegramId;
 
+    /**
+     * Valores em MAIUSCULAS por convencao fechada na Fase 2 e aplicada pela
+     * migracao V8. O CHECK do banco aceita apenas ATIVO e INATIVO — minusculo
+     * seria recusado.
+     */
     @Column(name = "status", nullable = false)
-    private String status = "ativo";
+    private String status = "ATIVO";
 
     @Column(name = "criado_em", insertable = false, updatable = false)
     private OffsetDateTime criadoEm;
@@ -65,22 +77,24 @@ public class Usuario {
     protected Usuario() {
     }
 
-    public Usuario(String nome, String email, String senhaHash) {
-        this.nome = nome;
-        this.email = email;
-        this.senhaHash = senhaHash;
-    }
+    // Nao existe construtor publico de criacao.
+    //
+    // Criar usuario pela aplicacao seria um INSERT direto, e a coluna
+    // senha_hash e NOT NULL — o INSERT falharia, porque a entidade nao mapeia
+    // essa coluna. O cadastro passa por auth_cadastrar_usuario, que grava as
+    // tres colunas de uma vez com privilegios de proprietario.
+    //
+    // A ausencia deste construtor e a documentacao executavel dessa regra:
+    // quem tentar `new Usuario(...)` nao compila, e vem ler este comentario.
 
-    public UUID getId()                    { return id; }
-    public String getNome()                { return nome; }
-    public String getEmail()               { return email; }
-    public String getSenhaHash()           { return senhaHash; }
-    public String getTelegramId()          { return telegramId; }
-    public String getStatus()              { return status; }
-    public OffsetDateTime getCriadoEm()    { return criadoEm; }
-    public OffsetDateTime getAtualizadoEm(){ return atualizadoEm; }
+    public UUID getId()                     { return id; }
+    public String getNome()                 { return nome; }
+    public String getEmail()                { return email; }
+    public String getTelegramId()           { return telegramId; }
+    public String getStatus()               { return status; }
+    public OffsetDateTime getCriadoEm()     { return criadoEm; }
+    public OffsetDateTime getAtualizadoEm() { return atualizadoEm; }
 
     public void setNome(String nome)             { this.nome = nome; }
     public void setTelegramId(String telegramId) { this.telegramId = telegramId; }
-    public void setSenhaHash(String senhaHash)   { this.senhaHash = senhaHash; }
 }

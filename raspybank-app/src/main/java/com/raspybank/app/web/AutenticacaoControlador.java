@@ -82,7 +82,7 @@ public class AutenticacaoControlador {
             usuarioId, requisicao.getHeader("User-Agent"));
 
         auditoria.registrarAutenticacao(
-            usuarioId, "web", "criacao", "{\"evento\":\"login\"}");
+            usuarioId, "WEB", "CRIACAO", "{\"evento\":\"login\"}");
 
         return ResponseEntity.ok(Map.of(
             "tokenAcesso",    acesso,
