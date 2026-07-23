@@ -55,6 +55,12 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!-- Filtros de seguranca, cadeia de autenticacao, CSRF -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
         <!-- Validação de dados de entrada (@NotNull, @Size...) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

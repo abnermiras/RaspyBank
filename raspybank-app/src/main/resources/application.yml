@@ -71,6 +71,20 @@ spring:
     # editar um arquivo antigo, a aplicação não sobe.
     validate-on-migrate: true
 
+# -----------------------------------------------------------------------------
+# Autenticação
+# -----------------------------------------------------------------------------
+raspybank:
+  jwt:
+    # Segredo que assina os tokens. Mínimo de 32 caracteres — a aplicação
+    # recusa-se a subir com menos, de propósito.
+    # Gere com: openssl rand -hex 32
+    #
+    # Trocar este valor invalida todos os tokens de acesso em circulação.
+    # É o botão de emergência: em caso de suspeita de vazamento, troque.
+    segredo: ${JWT_SEGREDO}
+    minutos-acesso: 15
+
 server:
   port: ${SERVER_PORT:8080}
   error:
