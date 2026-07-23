@@ -96,6 +96,17 @@
 | B-A7 | Conversão texto→enum na **borda**, uma única vez, via `valueOf`/`de(String)` | Falha com erro claro em vez de comparação de texto silenciosamente falsa |
 | B-A8 | Falhas de login: três `log.debug` distintos (e-mail inexistente / senha errada / status não-ativo), resposta HTTP idêntica nos três | Log para diagnóstico interno; uniformidade externa contra enumeração de cadastros. E-mail nunca vai para log (dado pessoal); UUID basta |
 
+# 4b. Decisões do Bloco C (23/07/2026)
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-C1 | Testes de integração usam a **MESMA imagem** (`postgres:18.4`) e o **MESMO script de init** (`infra/postgres/init/01-app-user.sh`) da infra real, via Testcontainers | Testar contra outra versão é testar outro banco; reescrever o init nos testes deixaria o script real sem cobertura |
+| B-C2 | Fumaça de RLS por **conexões JDBC cruas** (DriverManager), fora do pool da aplicação | O objeto sob teste são as POLÍTICAS, não o código Java. O teste controla `set_config` explicitamente; se o aspecto quebrar, quem acusa é o teste de fluxo HTTP, não este |
+| B-C3 | Regra de domínio nasce em classe **testável sem Spring** (padrão: `TokenRenovacaoTest`) | Fatia mais grossa da pirâmide roda em milissegundos, sem Docker. Regra que não der para testar assim está no lugar errado. Vale para TODO serviço de conta/fatura/parcela da V10+ |
+| B-C4 | O inventário de SECURITY DEFINER é **verificado por teste** (`MigracoesTest.inventarioSecurityDefinerConfere` confere `docs/security-definer.md` contra `pg_proc`) | Na primeira execução o teste já pegou o documento mentindo: `app_usuario_id()` nunca foi DEFINER (a V3 não a criou assim, e nem precisa — `current_setting` é legível por qualquer papel). Documento corrigido; o banco estava certo |
+| B-C5 | Container de teste é **singleton estático** compartilhado pela suíte, não `@Container` por classe | Subir Postgres uma vez por JVM, não uma vez por classe; o Ryuk limpa ao final |
+| B-C6 | `make gate` passa o ambiente por **`--env-file .env`**, não por lista de `-e` | A lista manual esqueceu `JWT_SEGREDO` e o gate nunca subia (achado N-01 da avaliação de 23/07). Com `--env-file`, variável nova no `.env` vale no gate automaticamente |
+
 # 5. Revisões registradas (R1–R6, sessão de requisitos)
 
 Decisões que substituíram decisões anteriores durante o próprio processo. O motivo da mudança é tão importante quanto a decisão final.

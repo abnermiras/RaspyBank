@@ -61,7 +61,49 @@ Convite por e-mail, código, ou adição manual. Fluxo pequeno, mas toca seguran
 
 Decisão de produto, não de modelo. Vive no futuro Mapa de Telas.
 
-## I-10 — Sem testes automatizados além do ArchUnit
+## I-10 — Sem testes automatizados além do ArchUnit — **RESOLVIDO (esqueleto) em 23/07/2026**
 
-Risco transversal apontado na avaliação de 23/07. O plano é o **Bloco C**: (1) Testcontainers com Postgres real para migrações + RLS (incluindo o teste de fumaça: dois usuários, cada um cego para os dados do outro); (2) regras de domínio como classes puras testáveis sem Spring — decisão de desenho a tomar ANTES do primeiro serviço de conta; (3) Spring Boot Test só nos fluxos de autenticação.
-**Quando resolver:** Bloco C, antes da V10 ser consumida por serviços.
+Risco transversal apontado na avaliação de 23/07. O plano era o **Bloco C**: (1) Testcontainers com Postgres real para migrações + RLS (incluindo o teste de fumaça: dois usuários, cada um cego para os dados do outro); (2) regras de domínio como classes puras testáveis sem Spring — decisão de desenho a tomar ANTES do primeiro serviço de conta; (3) Spring Boot Test só nos fluxos de autenticação.
+
+**Resolução:** os três itens existem e passam (31 testes). Decisões B-C1 a B-C5 em `decisoes.md`. Arquivos: `raspybank-app/src/test/java/com/raspybank/integracao/` (base + `MigracoesTest` + `RowLevelSecurityTest` + `AutenticacaoFluxoTest`) e `raspybank-identidade/.../TokenRenovacaoTest` (o padrão da camada pura). O esqueleto cobre a fundação; a V10 deve CRESCER esses arquivos, não criar outro modelo.
+
+---
+
+# Achados da avaliação de 23/07/2026 (ainda não resolvidos)
+
+Origem: varredura completa do repositório. Mesma regra do documento: registrado = adiado conscientemente.
+
+## I-11 — Corrida na rotação do token de renovação
+
+`AutenticacaoServico.renovar()` faz read-check-write sem trava: duas requisições simultâneas com o MESMO token podem ambas passar por `jaFoiUsado()` e ambas receber tokens novos — exatamente o cenário que a detecção de reuso existe para pegar. Correção: `UPDATE ... SET usado_em = now() WHERE token_hash = :h AND usado_em IS NULL` decidindo pelo contador de linhas (0 = reuso), ou `SELECT ... FOR UPDATE`.
+**Quando resolver:** próxima sessão que tocar autenticação; antes de expor à internet.
+
+## I-12 — Colisão de e-mail no cadastro vira 500
+
+Não há tratador global de erros; a violação de `ux_usuario_email` sobe como erro genérico. As telas precisarão de um contrato de erro estável (409 limpo para duplicata, 400 para validação, JSON uniforme).
+**Quando resolver:** ANTES das telas — é pré-requisito de frontend.
+
+## I-13 — `X-Canal` é auto-declarado pelo cliente
+
+`FiltroAutenticacaoJwt.canalDe()` confia num header que qualquer cliente forja. Quando o bot Telegram chegar, o canal deve derivar do caminho de autenticação (credencial/rota própria), nunca de header. Irmão do I-04.
+**Quando resolver:** junto com o I-04, no início do trabalho do bot.
+
+## I-14 — `/logout` derruba TODAS as sessões do usuário
+
+`encerrarSessoes()` revoga todos os tokens de todos os dispositivos. Pode ser o desejado ("sair de todos os lugares"), mas o nome promete outra coisa, e não existe logout de um único dispositivo porque o JWT não carrega `familia_id`. Decidir e registrar.
+**Quando resolver:** antes das telas (o botão "Sair" precisa saber o que faz).
+
+## I-15 — Renovação reseta o ambiente para o primeiro; não existe troca de ambiente
+
+`/login` e `/renovar` chamam `primeiroAmbienteDe()`. Usuário com dois ambientes operando no segundo volta ao primeiro a cada renovação. E não há endpoint de troca de ambiente — com R4 (multi-ambiente) sendo requisito central, a lacuna aparece no primeiro uso real de casal. `/renovar` deve preservar o ambiente do token anterior; a troca explícita precisa de endpoint próprio que valide o vínculo.
+**Quando resolver:** antes das telas — o seletor de ambiente é peça de UI.
+
+## I-16 — `token_renovacao.ip_origem` existe e nunca é gravado
+
+A V4 criou a coluna e a justificou ("a pessoa reconhecer sessões"); a entidade não a mapeia e o login não a preenche. Ou gravar, ou remover na V10.
+**Quando resolver:** na tela de "sessões ativas", se existir; senão, remover.
+
+## I-17 — Derivas menores entidade × schema e limpezas
+
+(a) `RegistroAuditoria.usuarioId` declara `nullable = false`, mas a V8 derrubou o NOT NULL da coluna; (b) javadoc do campo `canal` ainda cita valores minúsculos pré-V8; (c) import duplicado de `ContextoRequisicao` em `AutenticacaoControlador`; (d) `listarDoUsuarioSemContexto` devolve `List<Object>` em vez de `List<UUID>`; (e) senha sem `@Size(max = 72)` — BCrypt trunca em 72 bytes.
+**Quando resolver:** qualquer sessão de limpeza; nenhum tem efeito em produção hoje.

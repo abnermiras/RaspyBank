@@ -62,6 +62,10 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- Versões que não vêm do BOM do Spring Boot -->
+        <!-- Sobrepõe a versão do BOM (1.21.0): o Docker Engine 29 da VM exige
+             API >= 1.40, e o cliente embutido no Testcontainers 1.21.0 ainda
+             falava 1.32. Propriedade reconhecida pelo próprio BOM. -->
+        <testcontainers.version>1.21.3</testcontainers.version>
         <archunit.version>1.3.0</archunit.version>
         <springdoc.version>2.6.0</springdoc.version>
         <jjwt.version>0.12.6</jjwt.version>
@@ -142,6 +146,25 @@
     <build>
         <pluginManagement>
             <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <configuration>
+                        <systemPropertyVariables>
+                            <!--
+                              O Docker Engine 29 (da VM) exige API >= 1.40, mas o
+                              cliente docker-java embutido no Testcontainers ainda
+                              abre a conexão pedindo 1.32 — e o daemon recusa antes
+                              de qualquer negociação. Esta propriedade fixa a versão
+                              pedida. Sem ela, TODO teste de integração falha com
+                              "Could not find a valid Docker environment".
+                              Reavaliar quando o Testcontainers passar a negociar
+                              sozinho (aí esta configuração inteira pode sair).
+                            -->
+                            <api.version>1.44</api.version>
+                        </systemPropertyVariables>
+                    </configuration>
+                </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>

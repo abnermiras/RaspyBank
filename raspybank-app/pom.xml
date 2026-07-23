@@ -104,6 +104,21 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- Testcontainers: Postgres REAL nos testes de integração (Bloco C).
+             Sobe o mesmo postgres:18.4 da infra, com o mesmo script de init
+             que cria o usuário de aplicação. As versões vêm do BOM do Spring
+             Boot — por isso não há <version> aqui. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
 
     <build>

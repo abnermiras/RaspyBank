@@ -111,17 +111,17 @@ app: check-env  ## Sobe o backend na VM, com recarga rápida
 # -----------------------------------------------------------------------------
 # Portão — antes de dar uma feature por pronta
 # -----------------------------------------------------------------------------
+# O container recebe o .env INTEIRO via --env-file: variável nova no .env passa
+# a valer no gate automaticamente, sem precisar lembrar de acrescentar um -e
+# aqui (foi exatamente assim que JWT_SEGREDO ficou de fora e o gate quebrou).
+# O único -e explícito é DB_HOST, que dentro da rede do Compose é o nome do
+# serviço, não localhost — e -e vence o --env-file em caso de conflito.
 gate: check-env  ## Constrói a imagem real e sobe. Se passar aqui, passa no Pi.
 	docker build -t raspybank:local .
-	set -a; . ./.env; set +a; \
 	docker run --rm -it \
 		--network raspybank_raspybank \
+		--env-file .env \
 		-e DB_HOST=postgres \
-		-e POSTGRES_DB=$$POSTGRES_DB \
-		-e POSTGRES_USER=$$POSTGRES_USER \
-		-e POSTGRES_PASSWORD=$$POSTGRES_PASSWORD \
-		-e APP_DB_USER=$$APP_DB_USER \
-		-e APP_DB_PASSWORD=$$APP_DB_PASSWORD \
 		-p 127.0.0.1:8080:8080 \
 		raspybank:local
 

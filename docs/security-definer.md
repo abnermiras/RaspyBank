@@ -18,8 +18,10 @@ A solução escolhida: funções `SECURITY DEFINER` (executam com privilégios d
 
 ## Funções de contexto (V3) — leem a identidade da sessão
 
-### `app_usuario_id()`
-Devolve o UUID do usuário da sessão corrente, lido de `raspybank.usuario_id`. É a base de todas as políticas. SECURITY DEFINER para poder ser chamada de dentro das políticas sem recursão de permissão.
+### `app_usuario_id()` — **não é SECURITY DEFINER**
+Devolve o UUID do usuário da sessão corrente, lido de `raspybank.usuario_id`. É a base de todas as políticas — mas roda com privilégios de quem chama, porque `current_setting` é legível por qualquer papel e a função não toca tabela nenhuma. Não há RLS a atravessar, logo não há motivo para DEFINER.
+
+> **Correção de 23/07/2026 (primeira captura do Bloco C):** este documento afirmava que a função era SECURITY DEFINER "para evitar recursão de permissão". O teste `MigracoesTest.inventarioSecurityDefinerConfere` — que confere este inventário contra `pg_proc` — revelou na primeira execução que a V3 nunca a criou assim. O banco estava certo; o documento, não. Fica registrado como lembrete do motivo de o inventário ser verificado por teste e não por leitura.
 
 ### `app_ambientes_do_usuario()`
 Devolve o conjunto de ambientes vinculados ao usuário da sessão (consulta `usuario_ambiente`). Usada nas políticas por subquery — consequência da decisão R7 (tenant = usuário). **Corrigida na V8** para filtrar ambientes logicamente excluídos.
@@ -51,7 +53,7 @@ Lista ambientes de um usuário **por parâmetro** (não pela sessão). Usada no 
 
 | Função | Migração | Momento | Escopo |
 |---|---|---|---|
-| `app_usuario_id()` | V3 | Com sessão | Ler identidade |
+| `app_usuario_id()` — *não é DEFINER* | V3 | Com sessão | Ler identidade |
 | `app_ambientes_do_usuario()` | V3 (V8) | Com sessão | Visibilidade das políticas |
 | `auth_cadastrar_usuario` | V4 | Pré-identidade | Única escrita de `senha_hash` |
 | `auth_buscar_credenciais` | V4 | Pré-identidade | Única leitura de `senha_hash` |
