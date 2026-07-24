@@ -1,0 +1,297 @@
+/* ==========================================================================
+   RaspyBank — estilo do prototipo de telas
+   Uma folha so, sem framework e sem build: e proposital enquanto a escolha
+   da SPA (P-T6) esta em aberto. Nada aqui deve virar fundacao permanente.
+   ========================================================================== */
+
+:root {
+    --fundo: #f5f6f8;
+    --superficie: #ffffff;
+    --borda: #e2e5ea;
+    --texto: #1c2430;
+    --texto-fraco: #66717f;
+    --destaque: #1f6f5c;
+    --destaque-claro: #e7f2ee;
+    --erro: #a3242c;
+    --erro-claro: #fbeaeb;
+    --sombra: 0 1px 3px rgba(20, 30, 45, .08), 0 8px 24px rgba(20, 30, 45, .06);
+    --raio: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --fundo: #14181d;
+        --superficie: #1c2127;
+        --borda: #2c333c;
+        --texto: #e8ebef;
+        --texto-fraco: #9aa5b2;
+        --destaque: #4fbf9b;
+        --destaque-claro: #1d2c29;
+        --erro: #ef8a90;
+        --erro-claro: #2c1c1e;
+        --sombra: 0 1px 3px rgba(0, 0, 0, .4);
+    }
+}
+
+* { box-sizing: border-box; }
+
+/* O atributo hidden vale MENOS que qualquer regra de classe com display:
+   `.casca { display: flex }` sobrepunha `hidden` e as duas telas apareciam
+   empilhadas. Esta regra devolve ao hidden a ultima palavra. */
+[hidden] { display: none !important; }
+
+body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--fundo);
+    color: var(--texto);
+    line-height: 1.5;
+}
+
+/* --------------------------------------------------------------------------
+   Entrada (login e cadastro)
+   -------------------------------------------------------------------------- */
+
+.tela-entrada {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 1.5rem;
+}
+
+.cartao-entrada {
+    width: 100%;
+    max-width: 380px;
+    background: var(--superficie);
+    border: 1px solid var(--borda);
+    border-radius: var(--raio);
+    box-shadow: var(--sombra);
+    padding: 2rem;
+}
+
+.marca {
+    margin: 0;
+    font-size: 1.6rem;
+    letter-spacing: -.02em;
+}
+
+.marca .destaque { color: var(--destaque); }
+
+.subtitulo {
+    margin: .25rem 0 1.75rem;
+    color: var(--texto-fraco);
+    font-size: .9rem;
+}
+
+label {
+    display: block;
+    margin-bottom: .35rem;
+    font-size: .82rem;
+    font-weight: 600;
+    color: var(--texto-fraco);
+}
+
+input, select {
+    width: 100%;
+    padding: .6rem .7rem;
+    margin-bottom: 1rem;
+    font: inherit;
+    color: var(--texto);
+    background: var(--fundo);
+    border: 1px solid var(--borda);
+    border-radius: 6px;
+}
+
+input:focus, select:focus {
+    outline: 2px solid var(--destaque);
+    outline-offset: 1px;
+}
+
+.dica {
+    display: block;
+    margin: -.75rem 0 1rem;
+    color: var(--texto-fraco);
+    font-size: .78rem;
+}
+
+/* Marca o campo que o 400 apontou em "campos" — o contrato I-12 existe
+   justamente para o formulario poder fazer isto. */
+input.com-erro {
+    border-color: var(--erro);
+    background: var(--erro-claro);
+}
+
+.botao-principal {
+    width: 100%;
+    padding: .65rem;
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    background: var(--destaque);
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.botao-principal:hover { filter: brightness(1.08); }
+.botao-principal:disabled { opacity: .6; cursor: progress; }
+
+.botao-texto {
+    font: inherit;
+    color: var(--destaque);
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.alternar {
+    margin: 1.25rem 0 0;
+    font-size: .85rem;
+    color: var(--texto-fraco);
+    text-align: center;
+}
+
+.aviso {
+    margin: 0 0 1rem;
+    padding: .55rem .7rem;
+    font-size: .85rem;
+    color: var(--erro);
+    background: var(--erro-claro);
+    border-radius: 6px;
+}
+
+.aviso.sucesso {
+    color: var(--destaque);
+    background: var(--destaque-claro);
+}
+
+/* --------------------------------------------------------------------------
+   Casca autenticada
+   -------------------------------------------------------------------------- */
+
+.casca { min-height: 100vh; display: flex; flex-direction: column; }
+
+.topo {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    padding: .75rem 1.25rem;
+    background: var(--superficie);
+    border-bottom: 1px solid var(--borda);
+}
+
+.marca-pequena { font-weight: 700; letter-spacing: -.01em; }
+
+.seletor-ambiente { display: flex; align-items: center; gap: .5rem; }
+.seletor-ambiente select { margin: 0; width: auto; min-width: 190px; }
+.rotulo-ambiente { margin: 0; }
+
+.acoes-topo {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.saudacao { font-size: .85rem; color: var(--texto-fraco); }
+
+.corpo { flex: 1; display: flex; align-items: flex-start; }
+
+.menu {
+    width: 200px;
+    flex-shrink: 0;
+    padding: 1.25rem 1rem;
+    border-right: 1px solid var(--borda);
+    min-height: calc(100vh - 57px);
+}
+
+.item-menu {
+    display: block;
+    padding: .5rem .65rem;
+    margin-bottom: .2rem;
+    border-radius: 6px;
+    color: var(--texto);
+    text-decoration: none;
+    font-size: .9rem;
+}
+
+.item-menu.ativo { background: var(--destaque-claro); color: var(--destaque); font-weight: 600; }
+.item-menu.desabilitado { color: var(--texto-fraco); opacity: .55; cursor: not-allowed; }
+
+.nota-menu {
+    margin-top: 1.25rem;
+    font-size: .75rem;
+    color: var(--texto-fraco);
+}
+
+.centro {
+    flex: 1;
+    padding: 1.5rem;
+    display: grid;
+    gap: 1.25rem;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    align-content: start;
+}
+
+.painel {
+    background: var(--superficie);
+    border: 1px solid var(--borda);
+    border-radius: var(--raio);
+    box-shadow: var(--sombra);
+    padding: 1.25rem;
+}
+
+.painel h2 { margin: 0 0 .75rem; font-size: 1.05rem; }
+
+.texto-vazio { color: var(--texto-fraco); font-size: .88rem; }
+
+.previa {
+    width: 100%;
+    margin-top: 1rem;
+    border-collapse: collapse;
+    font-size: .85rem;
+}
+
+.previa th, .previa td {
+    padding: .45rem .6rem;
+    border-bottom: 1px solid var(--borda);
+    text-align: right;
+}
+
+.previa th:first-child, .previa td:first-child { text-align: left; }
+.previa thead th { color: var(--texto-fraco); font-weight: 600; }
+
+.celula-vazia { text-align: center !important; color: var(--texto-fraco); font-style: italic; }
+
+.lista-dados {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: .4rem 1rem;
+    margin: 0;
+    font-size: .85rem;
+}
+
+.lista-dados dt { color: var(--texto-fraco); }
+.lista-dados dd { margin: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; }
+
+.rodape-painel {
+    margin: 1rem 0 0;
+    font-size: .78rem;
+    color: var(--texto-fraco);
+}
+
+code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .95em;
+    background: var(--fundo);
+    padding: .1rem .3rem;
+    border-radius: 4px;
+}
+
+@media (max-width: 640px) {
+    .corpo { flex-direction: column; }
+    .menu { width: 100%; min-height: 0; border-right: 0; border-bottom: 1px solid var(--borda); }
+}

@@ -60,6 +60,19 @@ public class SegurancaConfig {
                     "/v3/api-docs/**",
                     "/swagger-ui/**",
                     "/swagger-ui.html").permitAll()
+
+                // As telas. A lista e explicita, arquivo por arquivo, em vez
+                // de um curinga como "/**.js": o curinga liberaria tambem o
+                // que ainda nao existe, e endpoint novo deve nascer protegido.
+                // Sao arquivos publicos por natureza — a tela de login precisa
+                // carregar ANTES de haver token. Nenhum dado sai daqui; o que
+                // eles fazem e chamar a API, essa sim autenticada.
+                .requestMatchers(
+                    "/",
+                    "/index.html",
+                    "/estilo.css",
+                    "/app.js",
+                    "/favicon.ico").permitAll()
                 // Tudo o mais exige autenticacao. Endpoint novo nasce
                 // protegido por padrao — o inverso seria pedir para esquecer.
                 .anyRequest().authenticated())

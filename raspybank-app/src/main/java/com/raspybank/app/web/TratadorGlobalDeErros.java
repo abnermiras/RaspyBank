@@ -8,6 +8,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
@@ -24,6 +25,7 @@ import java.util.Map;
  *
  * <ul>
  *   <li><b>400</b> — corpo invalido ou validacao de campos</li>
+ *   <li><b>404</b> — caminho ou recurso inexistente</li>
  *   <li><b>409</b> — conflito com estado existente (e-mail ja cadastrado)</li>
  *   <li><b>500</b> — erro nosso; o detalhe vai para o log, nunca para fora</li>
  * </ul>
@@ -58,6 +60,23 @@ public class TratadorGlobalDeErros {
     public ResponseEntity<Map<String, String>> corpoIlegivel(HttpMessageNotReadableException e) {
         return ResponseEntity.badRequest().body(Map.of(
             "erro", "Corpo da requisicao invalido ou ausente"));
+    }
+
+    /**
+     * Caminho que nao existe e <b>404</b>, nao 500.
+     *
+     * <p>Sem este tratador, a captura geral de {@code Exception} abaixo
+     * engolia a falta de recurso como erro interno — e a primeira execucao
+     * real provou o estrago: o navegador pede {@code /favicon.ico} sozinho,
+     * o arquivo nao existe, e o log enchia de pilha de excecao como se a
+     * aplicacao tivesse quebrado. Recurso ausente e resposta normal de um
+     * servidor web; nada aqui merece nivel ERROR.</p>
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, String>> recursoInexistente(NoResourceFoundException e) {
+        log.debug("Recurso estatico inexistente: {}", e.getResourcePath());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+            "erro", "Recurso nao encontrado"));
     }
 
     // -------------------------------------------------------------------------

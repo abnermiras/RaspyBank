@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RaspyBank</title>
+    <!-- Icone embutido como data URI: o navegador pede /favicon.ico sozinho em
+         toda visita, e sem isto a requisicao vira ruido no log do servidor. -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6f5c'/%3E%3Ctext x='16' y='23' font-family='system-ui,sans-serif' font-size='19' font-weight='700' fill='%23fff' text-anchor='middle'%3ER%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+
+<!-- ========================================================================
+     T-01 / T-02 — Login e cadastro
+     ===================================================================== -->
+<main id="tela-login" class="tela-entrada">
+    <div class="cartao-entrada">
+        <h1 class="marca">RaspyBank</h1>
+        <p class="subtitulo">Controle financeiro da casa</p>
+
+        <form id="form-login" autocomplete="on">
+            <label for="login-email">E-mail</label>
+            <input type="email" id="login-email" name="email" required autocomplete="username">
+
+            <label for="login-senha">Senha</label>
+            <input type="password" id="login-senha" name="senha" required autocomplete="current-password">
+
+            <p class="aviso" id="erro-login" hidden></p>
+            <button type="submit" class="botao-principal">Entrar</button>
+        </form>
+
+        <form id="form-cadastro" hidden autocomplete="on">
+            <label for="cadastro-nome">Nome</label>
+            <input type="text" id="cadastro-nome" name="nome" required autocomplete="name">
+
+            <label for="cadastro-email">E-mail</label>
+            <input type="email" id="cadastro-email" name="email" required autocomplete="username">
+
+            <label for="cadastro-senha">Senha</label>
+            <input type="password" id="cadastro-senha" name="senha" required
+                   minlength="10" maxlength="72" autocomplete="new-password">
+            <small class="dica">Ao menos 10 caracteres.</small>
+
+            <p class="aviso" id="erro-cadastro" hidden></p>
+            <button type="submit" class="botao-principal">Criar conta</button>
+        </form>
+
+        <p class="alternar">
+            <span id="texto-alternar">Ainda não tem conta?</span>
+            <button type="button" id="botao-alternar" class="botao-texto">Cadastre-se</button>
+        </p>
+    </div>
+</main>
+
+<!-- ========================================================================
+     T-03 — Casca autenticada
+     ===================================================================== -->
+<div id="tela-principal" class="casca" hidden>
+
+    <header class="topo">
+        <span class="marca-pequena">RaspyBank</span>
+
+        <div class="seletor-ambiente">
+            <label for="ambiente" class="rotulo-ambiente">Ambiente</label>
+            <select id="ambiente"></select>
+        </div>
+
+        <div class="acoes-topo">
+            <span id="saudacao" class="saudacao"></span>
+            <button type="button" id="botao-sair" class="botao-texto">Sair</button>
+        </div>
+    </header>
+
+    <div class="corpo">
+        <nav class="menu">
+            <a href="#" class="item-menu ativo" data-tela="mapa">Mapa de gastos</a>
+            <a href="#" class="item-menu desabilitado" title="Fatia 1 da V10">Lançamentos</a>
+            <a href="#" class="item-menu desabilitado" title="Fatia 1 da V10">Categorias</a>
+            <a href="#" class="item-menu desabilitado" title="Fatia 1 da V10">Contas</a>
+            <a href="#" class="item-menu desabilitado" title="Fatia 2 da V10">Cartões</a>
+            <p class="nota-menu">Itens acinzentados aguardam a V10.</p>
+        </nav>
+
+        <main class="centro">
+            <!-- T-07 — o lugar do mapa de gastos, ainda sem dados para somar -->
+            <section class="painel">
+                <h2>Mapa de gastos</h2>
+                <p class="texto-vazio">
+                    Aqui vai o quadro de gastos por categoria, mês a mês, com os
+                    totais — e, abaixo, um quadro por categoria aberto em
+                    subcategorias. Ele depende das tabelas de categoria, conta e
+                    lançamento, que chegam na fatia 1 da V10.
+                </p>
+                <table class="previa">
+                    <thead>
+                        <tr><th>Categoria</th><th>Jan</th><th>Fev</th><th>Mar</th><th>…</th><th>Total</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="6" class="celula-vazia">Sem lançamentos ainda</td></tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <!-- Painel de diagnóstico: a prova visível de que o circuito
+                 JWT -> contexto -> RLS -> banco funcionou de ponta a ponta. -->
+            <section class="painel painel-sessao">
+                <h2>Esta sessão</h2>
+                <dl class="lista-dados">
+                    <dt>Usuário</dt><dd id="dado-usuario">—</dd>
+                    <dt>Ambiente atual</dt><dd id="dado-ambiente">—</dd>
+                    <dt>Canal</dt><dd id="dado-canal">—</dd>
+                    <dt>Ambientes visíveis</dt><dd id="dado-quantidade">—</dd>
+                </dl>
+                <p class="rodape-painel">
+                    Estes dados vieram de <code>GET /api/perfil</code>. A lista de
+                    ambientes não é filtrada por código nenhum: quem filtra é o
+                    Row Level Security, no banco.
+                </p>
+            </section>
+        </main>
+    </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

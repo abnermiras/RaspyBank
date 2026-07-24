@@ -126,6 +126,18 @@ F15: lançamento fora de cartão nasce `PREVISTO` e vira `REALIZADO` na confirma
 
 ---
 
+## 5b. Protótipo navegável (23/07/2026)
+
+Existe um protótipo real de T-01/T-02/T-03 em `raspybank-app/src/main/resources/static/` (`index.html`, `estilo.css`, `app.js`), servido pela própria aplicação em `http://localhost:8080/`. Ele consome a API de verdade: login, cadastro, perfil, troca de ambiente, logout por dispositivo e renovação transparente com preservação de ambiente.
+
+**O que ele é:** a prova visível de que o circuito HTTP → JWT → contexto → RLS → banco funciona, e a validação prática do contrato de erro (o 409 e o mapa `campos` aparecem no formulário).
+
+**O que ele NÃO é:** a fundação do frontend. É JavaScript puro sem build, escrito porque P-T6 ainda não escolheu o framework. **Quando a SPA de verdade nascer, estes três arquivos morrem** — não devem ganhar features nem virar padrão.
+
+Decisões técnicas embutidas nele, que precisam de veredito próprio quando a SPA for desenhada:
+- **P-T8 (aberta) — onde guardar o token no navegador.** O protótipo usa `localStorage`, que é a escolha simples, não a segura: qualquer script injetado o lê. Aceitável num sistema familiar auto-hospedado; a alternativa (cookie `httpOnly` + `SameSite`, exigindo mudança no servidor) deve ser avaliada antes de expor à internet.
+- O `SegurancaConfig` libera os arquivos da tela por **lista explícita**, nunca por curinga. `TelasEstaticasTest` é a cerca: garante que a tela carrega sem token e que a API continua em 401.
+
 ## 6. Consequências imediatas (quando as perguntas fecharem)
 
 1. Desenhar a **V10 fatia 1** (migração primeiro, código depois — P3), crescendo os testes do Bloco C: fumaça de RLS para as tabelas novas, regras de domínio puras (padrão B-C3) para as somas do mapa.
