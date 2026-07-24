@@ -80,4 +80,26 @@ class TokenRenovacaoTest {
         assertFalse(t.estaValido(AGORA),
             "agora == expira_em deveria ser invalido: o contrato e ANTES do prazo");
     }
+
+    @Test
+    @DisplayName("Token usado segue VIGENTE: o uso nao e criterio de vigencia, e disputa a parte")
+    void usadoContinuaVigente() {
+        // A rotacao decide o "ja foi usado?" por UPDATE atomico no banco
+        // (I-11); vigente() responde apenas o que nao muda por corrida.
+        TokenRenovacao t = token(AGORA.plusDays(30), AGORA.plusDays(90));
+        t.marcarUsado();
+        assertTrue(t.vigente(AGORA), "uso nao deveria afetar a vigencia");
+        assertFalse(t.estaValido(AGORA), "mas o token usado segue invalido no criterio completo");
+    }
+
+    @Test
+    @DisplayName("Revogado, expirado ou alem do teto: NAO vigente, independente de uso")
+    void naoVigenteNosDemaisCriterios() {
+        TokenRenovacao revogado = token(AGORA.plusDays(30), AGORA.plusDays(90));
+        revogado.revogar();
+        assertFalse(revogado.vigente(AGORA));
+
+        assertFalse(token(AGORA.minusMinutes(1), AGORA.plusDays(90)).vigente(AGORA));
+        assertFalse(token(AGORA.plusDays(30), AGORA.minusMinutes(1)).vigente(AGORA));
+    }
 }

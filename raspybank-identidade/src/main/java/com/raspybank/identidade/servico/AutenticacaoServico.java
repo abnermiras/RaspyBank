@@ -149,12 +149,14 @@ public class AutenticacaoServico {
 
     /** Emite o primeiro token de uma nova familia. Chamado no login. */
     @Transactional
-    public String emitirRenovacaoNova(UUID usuarioId, String agenteUsuario) {
+    public SessaoNova emitirRenovacaoNova(UUID usuarioId, String agenteUsuario) {
         OffsetDateTime agora = OffsetDateTime.now();
-        return gravar(usuarioId, UUID.randomUUID(),
-                      agora.plusDays(DIAS_RENOVACAO),
-                      agora.plusDays(DIAS_TETO),
-                      agenteUsuario);
+        UUID familiaId = UUID.randomUUID();
+        String token = gravar(usuarioId, familiaId,
+                              agora.plusDays(DIAS_RENOVACAO),
+                              agora.plusDays(DIAS_TETO),
+                              agenteUsuario);
+        return new SessaoNova(token, familiaId);
     }
 
     /**
@@ -165,30 +167,41 @@ public class AutenticacaoServico {
      * Nao ha como distinguir com seguranca, entao o sistema assume o pior e
      * revoga a familia inteira. A pessoa precisa fazer login de novo — um
      * incomodo pequeno perto da alternativa.</p>
+     *
+     * <p>O "ja foi usado?" e decidido por um UPDATE atomico no banco, nao por
+     * leitura seguida de gravacao (I-11): duas requisicoes simultaneas com o
+     * mesmo token disputam a linha, exatamente uma vence, e a perdedora cai no
+     * ramo de reuso — que revoga a familia. Retry de rede simultaneo paga o
+     * mesmo preco do ladrao; e o custo assumido da postura "na duvida, o pior".</p>
+     *
+     * <p>Os tres desfechos sao tipos distintos porque o chamador precisa
+     * distingui-los INTERNAMENTE — reuso detectado merece auditoria — sem que
+     * a resposta externa mude: para o cliente, reuso e token invalido devem
+     * ser indistinguiveis.</p>
      */
     @Transactional
-    public Optional<ResultadoRenovacao> renovar(String tokenApresentado, String agenteUsuario) {
+    public Renovacao renovar(String tokenApresentado, String agenteUsuario) {
 
         String hash = hashDe(tokenApresentado);
         Optional<TokenRenovacao> encontrado = tokens.findByTokenHash(hash);
 
         if (encontrado.isEmpty()) {
-            return Optional.empty();
+            return new Renovacao.Invalida();
         }
 
         TokenRenovacao token = encontrado.get();
         OffsetDateTime agora = OffsetDateTime.now();
 
-        if (token.jaFoiUsado()) {
+        if (tokens.marcarUsadoSeInedito(hash, agora) == 0) {
             tokens.revogarFamilia(token.getFamiliaId(), agora);
-            return Optional.empty();
+            log.warn("Reuso de token de renovacao detectado: familia {} do usuario {} revogada.",
+                token.getFamiliaId(), token.getUsuarioId());
+            return new Renovacao.ReusoDetectada(token.getUsuarioId(), token.getFamiliaId());
         }
 
-        if (!token.estaValido(agora)) {
-            return Optional.empty();
+        if (!token.vigente(agora)) {
+            return new Renovacao.Invalida();
         }
-
-        token.marcarUsado();
 
         // O novo token herda a familia e o TETO do anterior. Herdar o teto e o
         // que impede a rotacao sucessiva de estender o acesso indefinidamente.
@@ -199,9 +212,16 @@ public class AutenticacaoServico {
             token.getTetoEm(),
             agenteUsuario);
 
-        return Optional.of(new ResultadoRenovacao(token.getUsuarioId(), novo));
+        return new Renovacao.Sucesso(token.getUsuarioId(), token.getFamiliaId(), novo);
     }
 
+    /** Encerra a sessao de UM dispositivo: a familia que veio no token. */
+    @Transactional
+    public void encerrarSessaoDaFamilia(UUID familiaId) {
+        tokens.revogarFamilia(familiaId, OffsetDateTime.now());
+    }
+
+    /** Encerra TODAS as sessoes da pessoa, em todos os dispositivos. */
     @Transactional
     public void encerrarSessoes(UUID usuarioId) {
         tokens.revogarTodosDoUsuario(usuarioId, OffsetDateTime.now());
@@ -245,6 +265,29 @@ public class AutenticacaoServico {
         }
     }
 
-    public record ResultadoRenovacao(UUID usuarioId, String novoTokenRenovacao) {
+    /** Sessao recem-criada no login: o token em texto (unica vez) e sua familia. */
+    public record SessaoNova(String tokenRenovacao, UUID familiaId) {
+    }
+
+    /**
+     * Desfecho da rotacao. Sealed de proposito: quem chama e obrigado pelo
+     * compilador a tratar os tres casos — inclusive o de reuso, que exige
+     * auditoria (I-03, opcao b).
+     */
+    public sealed interface Renovacao {
+
+        record Sucesso(UUID usuarioId, UUID familiaId, String novoTokenRenovacao)
+            implements Renovacao {
+        }
+
+        /** Token ja usado reapresentado; a familia inteira acabou de ser revogada. */
+        record ReusoDetectada(UUID usuarioId, UUID familiaId)
+            implements Renovacao {
+        }
+
+        /** Token desconhecido, expirado, revogado ou alem do teto. */
+        record Invalida()
+            implements Renovacao {
+        }
     }
 }

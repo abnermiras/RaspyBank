@@ -26,15 +26,18 @@ public final class ContextoRequisicao {
 
     private static final ThreadLocal<UUID>  USUARIO  = new ThreadLocal<>();
     private static final ThreadLocal<UUID>  AMBIENTE = new ThreadLocal<>();
+    private static final ThreadLocal<UUID>  FAMILIA  = new ThreadLocal<>();
     private static final ThreadLocal<Canal> CANAL    = new ThreadLocal<>();
 
     private ContextoRequisicao() {
         // Classe utilitaria: nao deve ser instanciada.
     }
 
-    public static void definir(UUID usuarioId, UUID ambienteId, Canal canal) {
+    public static void definir(UUID usuarioId, UUID ambienteId,
+                               UUID familiaId, Canal canal) {
         USUARIO.set(usuarioId);
         AMBIENTE.set(ambienteId);
+        FAMILIA.set(familiaId);
         CANAL.set(canal);
     }
 
@@ -46,6 +49,14 @@ public final class ContextoRequisicao {
     /** Ambiente em que o usuario esta operando, se ja selecionado. */
     public static Optional<UUID> ambienteId() {
         return Optional.ofNullable(AMBIENTE.get());
+    }
+
+    /**
+     * Familia do token de renovacao desta sessao — na pratica, "este
+     * dispositivo". Vazio em tokens antigos, emitidos antes da claim existir.
+     */
+    public static Optional<UUID> familiaId() {
+        return Optional.ofNullable(FAMILIA.get());
     }
 
     public static Canal canal() {
@@ -60,6 +71,7 @@ public final class ContextoRequisicao {
     public static void limpar() {
         USUARIO.remove();
         AMBIENTE.remove();
+        FAMILIA.remove();
         CANAL.remove();
     }
 }

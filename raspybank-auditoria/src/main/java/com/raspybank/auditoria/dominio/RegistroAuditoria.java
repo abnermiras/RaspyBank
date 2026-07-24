@@ -28,10 +28,16 @@ public class RegistroAuditoria {
     @Column(name = "ambiente_id")
     private UUID ambienteId;
 
-    @Column(name = "usuario_id", nullable = false)
+    /**
+     * Nulo quando o autor nao e identificavel — a V8 derrubou o NOT NULL da
+     * coluna justamente para a trilha aceitar eventos de sistema. A entidade
+     * acompanha o schema (I-17a): declarar nullable=false aqui faria o
+     * Hibernate recusar o que o banco aceita.
+     */
+    @Column(name = "usuario_id")
     private UUID usuarioId;
 
-    /** web, telegram ou sistema. E a razao de existir desta tabela. */
+    /** WEB, TELEGRAM ou SISTEMA (maiusculas desde a V8). E a razao de existir desta tabela. */
     @Column(name = "canal", nullable = false)
     private String canal;
 

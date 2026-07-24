@@ -15,6 +15,26 @@ public interface TokenRenovacaoRepositorio extends JpaRepository<TokenRenovacao,
     Optional<TokenRenovacao> findByTokenHash(String tokenHash);
 
     /**
+     * Reivindica o uso do token de forma ATOMICA: so a primeira requisicao
+     * que chegar leva o 1; qualquer outra recebe 0.
+     *
+     * <p>E a correcao da inconsistencia I-11: o par leitura + {@code
+     * marcarUsado()} na entidade abria uma janela em que duas requisicoes
+     * simultaneas com o MESMO token passavam ambas pela checagem e ambas
+     * recebiam tokens novos — exatamente o cenario que a deteccao de reuso
+     * existe para pegar. O WHERE com {@code usado_em IS NULL} faz o proprio
+     * banco arbitrar a corrida: o UPDATE e serializado pela trava de linha.</p>
+     *
+     * <p>{@code clearAutomatically} descarta o cache de primeiro nivel para a
+     * entidade nao esconder o valor recem-gravado.</p>
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE TokenRenovacao t SET t.usadoEm = :agora "
+         + "WHERE t.tokenHash = :tokenHash AND t.usadoEm IS NULL")
+    int marcarUsadoSeInedito(@Param("tokenHash") String tokenHash,
+                             @Param("agora") OffsetDateTime agora);
+
+    /**
      * Revoga a familia inteira de tokens.
      *
      * <p>Acionado quando um token ja usado reaparece — o que significa que

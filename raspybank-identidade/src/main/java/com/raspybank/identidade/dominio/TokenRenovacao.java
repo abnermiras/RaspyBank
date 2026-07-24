@@ -74,8 +74,21 @@ public class TokenRenovacao {
      * "ja usado" e uma delas: apos a rotacao, o token antigo morre.</p>
      */
     public boolean estaValido(OffsetDateTime agora) {
-        return usadoEm == null
-            && revogadoEm == null
+        return usadoEm == null && vigente(agora);
+    }
+
+    /**
+     * Vigencia SEM considerar o uso: nao revogado, dentro do prazo, dentro do
+     * teto.
+     *
+     * <p>Existe separada porque, na rotacao, o "ja foi usado?" nao pode ser
+     * decidido por este objeto: entre a leitura e a gravacao outra requisicao
+     * pode ter usado o token. Quem decide o uso e o banco, num UPDATE atomico
+     * ({@code marcarUsadoSeInedito} no repositorio). Este metodo responde o
+     * restante — as condicoes que nao mudam por corrida.</p>
+     */
+    public boolean vigente(OffsetDateTime agora) {
+        return revogadoEm == null
             && agora.isBefore(expiraEm)
             && agora.isBefore(tetoEm);
     }

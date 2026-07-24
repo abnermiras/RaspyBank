@@ -38,6 +38,7 @@ import java.util.UUID;
 public class JwtServico {
 
     private static final String CLAIM_AMBIENTE = "amb";
+    private static final String CLAIM_FAMILIA  = "fam";
     private static final String CLAIM_TIPO     = "typ";
     private static final String TIPO_ACESSO    = "acesso";
 
@@ -65,8 +66,11 @@ public class JwtServico {
      *
      * @param ambienteId ambiente em que a pessoa esta operando; pode ser nulo
      *                   logo apos o cadastro, antes de haver ambiente
+     * @param familiaId  familia do token de renovacao que sustenta esta sessao.
+     *                   E o que permite "sair deste dispositivo" revogar
+     *                   somente a cadeia certa (I-14)
      */
-    public String emitirAcesso(UUID usuarioId, UUID ambienteId) {
+    public String emitirAcesso(UUID usuarioId, UUID ambienteId, UUID familiaId) {
         Instant agora = Instant.now();
         Instant fim = agora.plus(minutosValidade, ChronoUnit.MINUTES);
 
@@ -78,6 +82,9 @@ public class JwtServico {
 
         if (ambienteId != null) {
             construtor.claim(CLAIM_AMBIENTE, ambienteId.toString());
+        }
+        if (familiaId != null) {
+            construtor.claim(CLAIM_FAMILIA, familiaId.toString());
         }
 
         return construtor.signWith(chave).compact();
@@ -107,7 +114,10 @@ public class JwtServico {
             String amb = claims.get(CLAIM_AMBIENTE, String.class);
             UUID ambienteId = (amb != null) ? UUID.fromString(amb) : null;
 
-            return Optional.of(new ConteudoToken(usuarioId, ambienteId));
+            String fam = claims.get(CLAIM_FAMILIA, String.class);
+            UUID familiaId = (fam != null) ? UUID.fromString(fam) : null;
+
+            return Optional.of(new ConteudoToken(usuarioId, ambienteId, familiaId));
 
         } catch (JwtException | IllegalArgumentException e) {
             return Optional.empty();
@@ -115,6 +125,6 @@ public class JwtServico {
     }
 
     /** Dados extraidos de um token valido. */
-    public record ConteudoToken(UUID usuarioId, UUID ambienteId) {
+    public record ConteudoToken(UUID usuarioId, UUID ambienteId, UUID familiaId) {
     }
 }

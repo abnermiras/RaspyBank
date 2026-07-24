@@ -74,9 +74,9 @@ public class AmbienteServico {
      */
     @Transactional(readOnly = true)
     @SuppressWarnings("unchecked")
-    public List<Object> listarDoUsuarioSemContexto(UUID usuarioId) {
-        return em.createNativeQuery(
-                "SELECT auth_ambientes_do_usuario(:usuario)")
+    public List<UUID> listarDoUsuarioSemContexto(UUID usuarioId) {
+        return (List<UUID>) em.createNativeQuery(
+                "SELECT auth_ambientes_do_usuario(:usuario)", UUID.class)
             .setParameter("usuario", usuarioId)
             .getResultList();
     }

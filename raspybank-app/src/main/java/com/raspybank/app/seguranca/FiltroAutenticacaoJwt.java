@@ -59,6 +59,7 @@ public class FiltroAutenticacaoJwt extends OncePerRequestFilter {
                 ContextoRequisicao.definir(
                     conteudo.usuarioId(),
                     conteudo.ambienteId(),
+                    conteudo.familiaId(),
                     canalDe(requisicao));
 
                 // O Spring Security precisa da sua propria representacao para

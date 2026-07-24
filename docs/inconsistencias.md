@@ -16,18 +16,17 @@ Leituras possíveis: (a) INATIVO = pausado/arquivado reversível, excluído = te
 **Risco se ignorado:** "ambiente excluído aparecendo em relatório" ou o inverso, com cada tela filtrando de um jeito.
 **Quando resolver:** antes da V10 se `conta_ambiente` referenciar o ciclo de vida do ambiente; senão, antes do CRUD de ambiente.
 
-## I-02 — `primeiroAmbienteDe` pode devolver `null` e o login segue
+## I-02 — `primeiroAmbienteDe` pode devolver `null` e o login segue — **RESOLVIDO em 23/07/2026**
 
 `AutenticacaoControlador.primeiroAmbienteDe()` devolve `null` para usuário sem ambiente, e o fluxo emite `jwt.emitirAcesso(usuarioId, null)` sem reclamar. Hoje impossível na prática (A12: cadastro cria o primeiro ambiente atomicamente), mas se acontecer, o sintoma será um token esquisito em vez de um erro claro.
 
-**Quando resolver:** barato — um guard clause com 500/409 explícito. Qualquer sessão que tocar o controlador.
+**Resolução:** guard clause com `IllegalStateException` explícita (→ 500 pelo tratador global). Decisão B-T8 em `decisoes.md`.
 
-## I-03 — `/renovar` não gera auditoria
+## I-03 — `/renovar` não gera auditoria — **RESOLVIDO em 23/07/2026**
 
 Login gera `ACESSO`; a renovação de token — que estende a sessão por mais 30 dias — passa em silêncio. Defensável (a trilha encheria a cada 15 min de uso ativo), mas hoje é **acidental**, não deliberado.
 
-**Decidir:** (a) não auditar renovação, registrado como deliberado; (b) auditar só a revogação de família (o evento de segurança relevante); (c) auditar tudo. A opção (b) parece o melhor custo/benefício — reuso de token detectado é exatamente o que se quer na trilha.
-**Quando resolver:** próxima sessão que tocar autenticação.
+**Resolução:** opção (b), como sugerido. Renovação normal não audita (agora deliberado); reuso detectado audita `ACESSO` com `{"evento":"reuso_token_renovacao"}`. O resultado `sealed` do serviço obriga o controlador a tratar o caso. Decisão B-T4 em `decisoes.md`.
 
 ## I-04 — `Canal.WEB` fixo nos chamadores
 
@@ -73,37 +72,42 @@ Risco transversal apontado na avaliação de 23/07. O plano era o **Bloco C**: (
 
 Origem: varredura completa do repositório. Mesma regra do documento: registrado = adiado conscientemente.
 
-## I-11 — Corrida na rotação do token de renovação
+## I-11 — Corrida na rotação do token de renovação — **RESOLVIDO em 23/07/2026**
 
 `AutenticacaoServico.renovar()` faz read-check-write sem trava: duas requisições simultâneas com o MESMO token podem ambas passar por `jaFoiUsado()` e ambas receber tokens novos — exatamente o cenário que a detecção de reuso existe para pegar. Correção: `UPDATE ... SET usado_em = now() WHERE token_hash = :h AND usado_em IS NULL` decidindo pelo contador de linhas (0 = reuso), ou `SELECT ... FOR UPDATE`.
-**Quando resolver:** próxima sessão que tocar autenticação; antes de expor à internet.
 
-## I-12 — Colisão de e-mail no cadastro vira 500
+**Resolução:** a primeira alternativa (`marcarUsadoSeInedito` no repositório). Teste de corrida real com duas requisições simultâneas: `AutenticacaoFluxoTest.renovacoesSimultaneasSoUmaVence`. Decisão B-T3 em `decisoes.md`.
+
+## I-12 — Colisão de e-mail no cadastro vira 500 — **RESOLVIDO em 23/07/2026**
 
 Não há tratador global de erros; a violação de `ux_usuario_email` sobe como erro genérico. As telas precisarão de um contrato de erro estável (409 limpo para duplicata, 400 para validação, JSON uniforme).
-**Quando resolver:** ANTES das telas — é pré-requisito de frontend.
+
+**Resolução:** `TratadorGlobalDeErros` (`@RestControllerAdvice`): contrato `{"erro": ...}` (+ `"campos"` na validação), 409 para duplicata, 400 para validação/corpo ilegível, 500 sem vazamento. Decisões B-T1/B-T2 em `decisoes.md`.
 
 ## I-13 — `X-Canal` é auto-declarado pelo cliente
 
 `FiltroAutenticacaoJwt.canalDe()` confia num header que qualquer cliente forja. Quando o bot Telegram chegar, o canal deve derivar do caminho de autenticação (credencial/rota própria), nunca de header. Irmão do I-04.
 **Quando resolver:** junto com o I-04, no início do trabalho do bot.
 
-## I-14 — `/logout` derruba TODAS as sessões do usuário
+## I-14 — `/logout` derruba TODAS as sessões do usuário — **RESOLVIDO em 23/07/2026**
 
 `encerrarSessoes()` revoga todos os tokens de todos os dispositivos. Pode ser o desejado ("sair de todos os lugares"), mas o nome promete outra coisa, e não existe logout de um único dispositivo porque o JWT não carrega `familia_id`. Decidir e registrar.
-**Quando resolver:** antes das telas (o botão "Sair" precisa saber o que faz).
 
-## I-15 — Renovação reseta o ambiente para o primeiro; não existe troca de ambiente
+**Resolução:** o JWT ganhou a claim `fam`; `/logout` revoga só a família da sessão atual (este dispositivo), `/logout-todos` revoga todas. Token sem `fam` cai no comportamento antigo — o lado seguro. Decisão B-T5 em `decisoes.md`.
+
+## I-15 — Renovação reseta o ambiente para o primeiro; não existe troca de ambiente — **RESOLVIDO em 23/07/2026**
 
 `/login` e `/renovar` chamam `primeiroAmbienteDe()`. Usuário com dois ambientes operando no segundo volta ao primeiro a cada renovação. E não há endpoint de troca de ambiente — com R4 (multi-ambiente) sendo requisito central, a lacuna aparece no primeiro uso real de casal. `/renovar` deve preservar o ambiente do token anterior; a troca explícita precisa de endpoint próprio que valide o vínculo.
-**Quando resolver:** antes das telas — o seletor de ambiente é peça de UI.
+
+**Resolução:** `/renovar` aceita `ambienteId` opcional e preserva (com vínculo conferido; fallback para o primeiro, sempre informado na resposta); troca explícita em `POST /api/sessao/ambiente`, protegida, validando o vínculo com RLS ativo. Decisões B-T6/B-T7 em `decisoes.md`.
 
 ## I-16 — `token_renovacao.ip_origem` existe e nunca é gravado
 
 A V4 criou a coluna e a justificou ("a pessoa reconhecer sessões"); a entidade não a mapeia e o login não a preenche. Ou gravar, ou remover na V10.
 **Quando resolver:** na tela de "sessões ativas", se existir; senão, remover.
 
-## I-17 — Derivas menores entidade × schema e limpezas
+## I-17 — Derivas menores entidade × schema e limpezas — **RESOLVIDO em 23/07/2026**
 
 (a) `RegistroAuditoria.usuarioId` declara `nullable = false`, mas a V8 derrubou o NOT NULL da coluna; (b) javadoc do campo `canal` ainda cita valores minúsculos pré-V8; (c) import duplicado de `ContextoRequisicao` em `AutenticacaoControlador`; (d) `listarDoUsuarioSemContexto` devolve `List<Object>` em vez de `List<UUID>`; (e) senha sem `@Size(max = 72)` — BCrypt trunca em 72 bytes.
-**Quando resolver:** qualquer sessão de limpeza; nenhum tem efeito em produção hoje.
+
+**Resolução:** os cinco corrigidos junto com o bloco pré-telas. Ressalva no (e): `@Size` conta caracteres, não bytes — senha com muitos caracteres multibyte ainda pode passar de 72 bytes; aceitável porque o BCrypt trunca em silêncio, sem erro.
