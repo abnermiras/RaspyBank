@@ -1,20 +1,19 @@
 # RaspyBank — Inconsistências e Pendências Conhecidas
 
-**Versão:** 1.0
-**Data:** 23 de julho de 2026
+**Versão:** 1.1
+**Data:** 26 de julho de 2026
 **Regra deste documento:** ambiguidade registrada é decisão adiada conscientemente; ambiguidade solta reaparece como bug. Cada item tem um "quando resolver" — nenhum é urgente por definição, senão já teria sido resolvido.
 **Ao resolver um item:** mover a decisão para `decisoes.md` e marcar aqui como resolvido com a referência, sem apagar.
 
 ---
 
-## I-01 — `ambiente.status` × `ambiente.excluido_em`: dois mecanismos de ciclo de vida
+## I-01 — `ambiente.status` × `ambiente.excluido_em`: dois mecanismos de ciclo de vida — **RESOLVIDO em 26/07/2026**
 
 A tabela `ambiente` tem `status` (`ATIVO/INATIVO`) **e** `excluido_em` (timestamp nullable), e `app_ambientes_do_usuario()` filtra pela exclusão lógica. Pergunta sem dono: **o que `INATIVO` significa que `excluido_em` não significa?**
 
 Leituras possíveis: (a) INATIVO = pausado/arquivado reversível, excluído = terminal — dois estados legítimos; (b) `status` é vestígio e nunca é gravado por ninguém — peso morto; (c) coexistem sem regra — o pior caso, cada query escolhendo um critério.
 
-**Risco se ignorado:** "ambiente excluído aparecendo em relatório" ou o inverso, com cada tela filtrando de um jeito.
-**Quando resolver:** antes da V10 se `conta_ambiente` referenciar o ciclo de vida do ambiente; senão, antes do CRUD de ambiente.
+**Resolução:** leitura (b). A V10 derruba a coluna `status`; o ciclo de vida fica só em `excluido_em`, e a exclusão lógica **é** o arquivamento reversível (basta anular a coluna). Decisão B-D5 em `decisoes.md`. Este item virou o critério de projeto usado no resto da varredura de 26/07: **uma flag, um trabalho** — foi ele que expôs o defeito de `sistemica` acumulando dois significados (B-D15) e a redundância de F31 (B-D4).
 
 ## I-02 — `primeiroAmbienteDe` pode devolver `null` e o login segue — **RESOLVIDO em 23/07/2026**
 
@@ -34,11 +33,11 @@ Login gera `ACESSO`; a renovação de token — que estende a sessão por mais 3
 
 **Quando resolver:** no início do trabalho do bot Telegram, como primeiro item. Não generalizar antes — YAGNI.
 
-## I-05 — Auditoria: gatilho (F26) × serviço (requisitos) — convivência a validar
+## I-05 — Auditoria: gatilho (F26) × serviço (requisitos) — **RESOLVIDO em 26/07/2026**
 
 Os requisitos fecharam auditoria escrita pela camada de serviço (para capturar canal); a Fase 2 fechou F26 com gatilho lendo contexto RLS para as tabelas de domínio. A leitura harmonizada (registrada em `decisoes.md`): gatilho para domínio, serviço para autenticação. Mas essa convivência ainda não foi exercitada — a V10 será o teste. Se o gatilho não conseguir capturar canal de forma satisfatória, revisar formalmente qual modelo vence.
 
-**Quando resolver:** durante o desenho da V10.
+**Resolução:** nenhum dos dois lados perdeu. O conflito existia por uma razão só — o gatilho não sabia o canal — e ela foi removida: o aspecto `ConfiguradorSessaoRls` passa a injetar `raspybank.canal` na mesma transação em que já injeta `raspybank.usuario_id`, e o gatilho lê os dois. F26 segue valendo, com a virtude intacta (alteração feita por fora da aplicação grava autor nulo e se denuncia). Decisão B-D6 em `decisoes.md`.
 
 ## I-06 — Argon2id (requisitos) × BCrypt 12 (implementado)
 
@@ -49,16 +48,18 @@ O documento de requisitos especifica Argon2id para hash de senha; a implementaç
 ## I-07 — Estados da Fatura (pendência herdada dos requisitos)
 
 Confirmar o conjunto derivável: Aberta, Fechada, Paga, Vencida — lembrando F19: **não existe coluna de status**; tudo deriva de `fechada_em` + somas de pagamento + vencimento.
-**Quando resolver:** no desenho da V10 (tabela `fatura`).
+**Quando resolver:** no desenho da **V11** (a fatia 2 passou a ser V11 por B-D1; `fatura` não está mais na V10).
 
 ## I-08 — Entrada de usuário em ambiente existente (pendência herdada)
 
 Convite por e-mail, código, ou adição manual. Fluxo pequeno, mas toca segurança (quem pode adicionar quem).
 **Quando resolver:** depois da V10, antes de qualquer uso real compartilhado.
 
-## I-09 — Dashboard (pendência herdada)
+## I-09 — Dashboard (pendência herdada) — **RESOLVIDO em 26/07/2026**
 
 Decisão de produto, não de modelo. Vive no futuro Mapa de Telas.
+
+**Resolução:** o Mapa de Telas existe e respondeu. Dashboard com gráficos está explicitamente **fora** do mínimo aceitável (`mapa-telas.md` §3); quem ocupa o centro da tela principal é a T-07, o mapa de gastos — que é uma matriz, não um painel de indicadores. A pendência deixa de ser ambiguidade e vira item de backlog comum.
 
 ## I-10 — Sem testes automatizados além do ArchUnit — **RESOLVIDO (esqueleto) em 23/07/2026**
 
@@ -101,13 +102,71 @@ Não há tratador global de erros; a violação de `ux_usuario_email` sobe como 
 
 **Resolução:** `/renovar` aceita `ambienteId` opcional e preserva (com vínculo conferido; fallback para o primeiro, sempre informado na resposta); troca explícita em `POST /api/sessao/ambiente`, protegida, validando o vínculo com RLS ativo. Decisões B-T6/B-T7 em `decisoes.md`.
 
-## I-16 — `token_renovacao.ip_origem` existe e nunca é gravado
+## I-16 — `token_renovacao.ip_origem` existe e nunca é gravado — **RESOLVIDO em 26/07/2026**
 
 A V4 criou a coluna e a justificou ("a pessoa reconhecer sessões"); a entidade não a mapeia e o login não a preenche. Ou gravar, ou remover na V10.
-**Quando resolver:** na tela de "sessões ativas", se existir; senão, remover.
+
+**Resolução:** passa a ser gravado no login, a partir do request. A coluna deixa de ser órfã **em troca de um compromisso**: a tela de sessões ativas entra no roteiro pós-mínimo aceitável (item I-18 abaixo). Decisão B-D7 em `decisoes.md`. Sem a tela, é dado pessoal parado — e nesse caso o item volta à pauta para remoção, não para ser esquecido de novo.
 
 ## I-17 — Derivas menores entidade × schema e limpezas — **RESOLVIDO em 23/07/2026**
 
 (a) `RegistroAuditoria.usuarioId` declara `nullable = false`, mas a V8 derrubou o NOT NULL da coluna; (b) javadoc do campo `canal` ainda cita valores minúsculos pré-V8; (c) import duplicado de `ContextoRequisicao` em `AutenticacaoControlador`; (d) `listarDoUsuarioSemContexto` devolve `List<Object>` em vez de `List<UUID>`; (e) senha sem `@Size(max = 72)` — BCrypt trunca em 72 bytes.
 
 **Resolução:** os cinco corrigidos junto com o bloco pré-telas. Ressalva no (e): `@Size` conta caracteres, não bytes — senha com muitos caracteres multibyte ainda pode passar de 72 bytes; aceitável porque o BCrypt trunca em silêncio, sem erro.
+
+---
+
+# Achados da varredura de 26/07/2026 (pré-V10)
+
+Origem: auditoria dos documentos contra o código, feita a pedido, **antes** de escrever a primeira linha da V10. Três contradições e duas lacunas não estavam registradas em lugar nenhum — todas foram decididas na mesma sessão e vivem em `decisoes.md` §4d. Ficam aqui pelo rastro: o que estava errado importa tanto quanto o que ficou certo.
+
+## I-19 — Os dois documentos descreviam V10 diferentes — **RESOLVIDO em 26/07/2026**
+
+`decisoes.md` §6 dizia V10 = `conta`, `conta_ambiente`, `cartao`, `cartao_emitido`, `fatura`. `mapa-telas.md` §4 dizia fatia 1 = `categoria`, `subcategoria`, `conta`, `lancamento`. Nenhuma lista continha a outra, e **nenhuma das duas estava completa**: faltava `conta_ambiente` numa (sem ela `conta` não tem política de RLS, porque R7 faz a visibilidade por subquery sobre a tabela de vínculo) e faltavam `categoria`, `lancamento`, `parcela` e `regra_recorrencia` na outra.
+
+**Resolução:** B-D1 — V10 (fatia 1) e V11 (fatia 2), com as listas completas em `decisoes.md` §6.
+**Lição registrada:** duas listas da mesma coisa em documentos diferentes divergem sem ninguém perceber. A lista canônica é a de `decisoes.md` §6; `mapa-telas.md` referencia, não repete.
+
+## I-20 — Lançamento em conta compartilhada não tinha ambiente definido — **RESOLVIDO em 26/07/2026**
+
+R7 justifica `conta_ambiente` N:N com "contas conjuntas visíveis em mais de um ambiente". F4 diz que todo lançamento aponta para exatamente uma conta. F33 diz que o relatório filtra por `lancamento.ambiente_id`. Os três juntos deixavam sem resposta: numa conta visível em dois ambientes, de qual ambiente é o gasto? Ninguém tinha decidido, e a primeira tela de lançamento teria que inventar.
+
+**Resolução:** B-D2 — o ambiente ativo da sessão, com restrição garantindo que a conta pertence a ele.
+
+## I-21 — A lista de categorias sistêmicas nunca foi escrita — **RESOLVIDO em 26/07/2026**
+
+F10 diz que `categoria.codigo` identifica as sistêmicas; F13 diz que ambiente novo nasce com elas; F9 diz que são copiadas por ambiente. **Quais são elas não estava em documento nenhum** — e é semente de migração: sem a lista, a V10 não sai. Junto veio a descoberta de que `auth_criar_ambiente_inicial` (V5) nunca cumpriu a promessa de F13: cria ambiente e vínculo, mais nada.
+
+**Resolução:** B-D13 (as três: `TRANSFERENCIA`, `AJUSTE`, `NAO_CLASSIFICADO`), B-D14 (sem kit inicial), B-D15 (`sistemica` ≠ `entra_no_mapa`), B-D16 (V5 estendida + retroalimentação dos ambientes existentes).
+
+## I-22 — F15 tornava a tela central inutilizável no mínimo aceitável — **RESOLVIDO em 26/07/2026**
+
+F15 (lançamento fora de cartão nasce `PREVISTO`) foi escrita na Fase 2, antes de existir tela. Como o mínimo aceitável não tem cartão, **todo** lançamento nasceria previsto; com o mapa somando realizados, o usuário cadastraria dez gastos já pagos e a tela central continuaria zerada até confirmar os dez.
+
+**Resolução:** B-D9 / R9 — o status deriva da data de caixa.
+**Lição registrada:** decisão de modelo tomada antes de existir tela precisa ser reencontrada quando a tela aparece. F15 não estava errada; estava incompleta por falta de um caso que só a tela revelou.
+
+## I-18 — Tela de sessões ativas *(aberta — compromisso assumido em 26/07/2026)*
+
+Contrapartida de B-D7: `token_renovacao.ip_origem` passou a ser gravado, e gravar dado pessoal só se justifica se ele for usado. A tela lista as sessões do usuário (dispositivo, IP, último uso) e permite encerrar uma delas — o `/logout` por família (B-T5) já dá a mecânica pronta.
+
+**Quando resolver:** depois do mínimo aceitável, antes de qualquer exposição à internet. Se for descartada, o I-16 reabre para remover a coluna.
+
+---
+
+# Situação em 26/07/2026
+
+**Resolvidos:** I-01, I-02, I-03, I-05, I-09, I-10, I-11, I-12, I-14, I-15, I-16, I-17, I-19, I-20, I-21, I-22.
+
+**Abertos, com dono e momento:**
+
+| Item | Assunto | Quando |
+|---|---|---|
+| I-04 + I-13 | Canal auto-declarado (`Canal.WEB` fixo, header `X-Canal`) | Primeiro item do trabalho do bot Telegram. B-D6 preparou o terreno: o canal já viaja no contexto do RLS |
+| I-06 | Argon2id (requisitos) × BCrypt 12 (código) | Antes de publicar para terceiros |
+| I-07 | Estados da Fatura | Desenho da V11 |
+| I-08 | Entrada de usuário em ambiente existente (convite) | Depois do mínimo, antes de uso compartilhado real |
+| I-18 | Tela de sessões ativas | Depois do mínimo, antes de exposição à internet |
+| P-T8 | Token em `localStorage` × cookie `httpOnly` (`mapa-telas.md`) | Antes de expor à internet |
+
+Nenhum dos abertos bloqueia a V10.

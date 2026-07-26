@@ -1,9 +1,9 @@
 # RaspyBank — Registro de Decisões Vigentes
 
-**Versão:** 1.0
-**Data:** 23 de julho de 2026
+**Versão:** 1.1
+**Data:** 26 de julho de 2026
 **Status:** Fonte de verdade. Quando qualquer documento, conversa ou código contradisser este registro, ESTE registro prevalece — ou é formalmente revisado.
-**Origem:** consolida as decisões das sessões "Estrutura de requisitos funcionais" (20/07), "Reescrita do RaspyBank Systems v1.0" (22–23/07), "Modelo lógico e DER" (23/07) e "Bloco A — refactor de enums" (23/07).
+**Origem:** consolida as decisões das sessões "Estrutura de requisitos funcionais" (20/07), "Reescrita do RaspyBank Systems v1.0" (22–23/07), "Modelo lógico e DER" (23/07), "Bloco A — refactor de enums" (23/07) e "Bloco de Domínio — varredura pré-V10" (26/07).
 
 ---
 
@@ -60,8 +60,8 @@
 | F11 | Lançamento carrega `categoria_id` e `subcategoria_id`, com FK composta; subcategoria opcional |
 | F12 | `categoria.tipo` com `ENTRADA`/`SAIDA`/`AMBOS` |
 | F13 | Ambiente novo nasce só com as sistêmicas |
-| F14 | `data_competencia` e `data_caixa`; no cartão, `data_caixa` é gravada e mantida pela fatura |
-| F15 | Lançamento de cartão nasce `REALIZADO`; os demais nascem `PREVISTO` |
+| F14 | `data_competencia` e `data_caixa`; no cartão, `data_caixa` é gravada e mantida pela fatura *(tipo fixado em `date` por B-D8)* |
+| F15 | Lançamento de cartão nasce `REALIZADO`; os demais nascem `PREVISTO` — **emendada por B-D9 (ver R9)** |
 | F16 | Lançamento é editável e excluível, com auditoria; transferência propaga para o par |
 | F17 | `cartao` é filha de `conta`, natureza `PASSIVO`; saldo devedor e limite disponível são cálculo |
 | F18 | `cartao_emitido` referencia `cartao`; limite e fatura são do contrato |
@@ -77,7 +77,7 @@
 | F28 | Outbox alimentado desde o primeiro lançamento, com relay em processo |
 | F29 | `lancamento.observacao` em texto livre; anexo fora da v1.0 |
 | F30 | Cotas e preço médio fora da v1.0 |
-| F31 | Lançamento guarda `categoria_nome`/`subcategoria_nome` gravados na criação |
+| F31 | ~~Lançamento guarda `categoria_nome`/`subcategoria_nome` gravados na criação~~ — **REVOGADA por B-D4 (ver R8)** |
 | F32 | `criado_por` imutável; `responsavel_id` editável |
 | F33 | Relatório de ambiente filtra por `lancamento.ambiente_id`; extrato de conta é por conta |
 
@@ -122,6 +122,47 @@ O bloco que resolve I-02, I-03, I-11, I-12, I-14, I-15 e I-17 — o contrato que
 | B-T7 | **Troca explícita de ambiente** em `POST /api/sessao/ambiente` (fora de `/api/auth/**`, que é `permitAll`): confere o vínculo com RLS ativo e emite novo token de acesso; o de renovação não muda. Vínculo inexistente → 403 | Trocar de ambiente é reemitir o recorte de dados, não recriar a sessão. O prefixo `/api/sessao` nasce protegido por padrão — a regra da casa para endpoint novo |
 | B-T8 | Guard clause em `primeiroAmbienteDe` (I-02): usuário sem ambiente explode com `IllegalStateException` clara (→ 500), nunca token com ambiente nulo | Estado impossível por construção (A12); se acontecer, o sintoma deve ser barulhento, não um token esquisito |
 
+# 4d. Decisões do Bloco de Domínio (26/07/2026)
+
+A sessão que varreu tudo que estava pendente **antes** de escrever a primeira linha da V10. Origem: auditoria dos documentos contra o código, que encontrou três contradições nunca registradas (escopo da V10, ambiente do lançamento, agrupamento do mapa) e uma lacuna silenciosa (a lista de categorias sistêmicas nunca foi escrita).
+
+## Modelo
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D1 | **A V10 vira duas migrações.** V10 = `categoria`, `subcategoria`, `conta`, `conta_ambiente`, `lancamento` (+ políticas RLS, gatilhos F26, outbox F28, sistêmicas F9/F13). V11 = `cartao`, `cartao_emitido`, `fatura`, `parcela`, `regra_recorrencia` | `decisoes.md` §6 e `mapa-telas.md` §4 descreviam V10 de formas incompatíveis, e **nenhuma das duas listas estava completa** — faltava `conta_ambiente` numa e `categoria`/`lancamento`/`parcela`/`regra_recorrencia` na outra. Migração aplicada é imutável: uma V10 gigante que erre em `fatura` obriga corretiva sobre tabela recém-nascida. A V10 agora é exatamente o mínimo aceitável, e a parte funda do domínio (F17–F23) espera a V11 |
+| B-D2 | **`lancamento.ambiente_id` = ambiente ativo da sessão** no momento da criação. Restrição garante que a conta pertence àquele ambiente (via `conta_ambiente`). Sem campo de ambiente no formulário | Conta conjunta visível em dois ambientes (o caso que motivou R7) deixava F33 sem resposta: de qual ambiente é o gasto? A sessão já responde — "estou olhando a Casa, logo lancei um gasto da Casa". Torna o caso comum invisível e o caso raro (trocar de ambiente e relançar) explícito |
+| B-D3 | **O mapa é chaveado por `categoria_id`/`subcategoria_id`; o nome é texto pendurado no id.** Renomear altera o texto em todos os lançamentos, passados inclusive, e **nunca** cria id novo | Uma categoria é uma coisa; o nome dela é um rótulo. Agrupar por rótulo partiria a mesma categoria em duas linhas depois de um rename, e o total dela ficaria dividido sem que nada de errado tivesse acontecido |
+| B-D4 | **F31 revogada** (ver R8): sem `categoria_nome`/`subcategoria_nome` no lançamento. Em troca, **categoria e subcategoria não se excluem, se arquivam** (`arquivada_em`), espelho de F7 | Com B-D3, o nome exibido vem sempre do id — a cópia congelada só se justificaria se o id pudesse deixar de resolver. Com exclusão apenas lógica, ele sempre resolve, e a coluna congelada vira a mesma fonte-dupla que o I-01 acabou de eliminar. Arquivada, a categoria some do formulário de lançamento novo e continua nomeando o histórico inteiro |
+| B-D5 | **`ambiente.status` é derrubada** (I-01). Ciclo de vida só por `excluido_em`: NULL = ativo, preenchido = arquivado, e anular reverte | Dois mecanismos para a mesma pergunta garantem que alguma query vai checar só um. `status` nunca foi gravado por ninguém; `app_ambientes_do_usuario()` já filtrava por `excluido_em`. Exclusão lógica **é** o arquivamento reversível — não faltava estado, sobrava coluna |
+| B-D8 | **`data_caixa` e `data_competencia` são `date`**, nunca `timestamptz` | O banco guarda timestamps em UTC por arquitetura. Com regime de caixa (P-T2), um lançamento às 21h de 31/jan em São Paulo seria 01/fev em UTC e cairia no mês errado do quadro central. Data de dinheiro não tem hora, e `date` não tem fuso para errar |
+| B-D9 | **O status do lançamento deriva da data de caixa** (emenda F15, ver R9): data no passado ou hoje → `REALIZADO`; data no futuro → `PREVISTO`. Sem campo de status no formulário. Cartão segue nascendo `REALIZADO` | F15 foi escrita antes de existir tela. Como o mínimo aceitável não tem cartão, F15 ao pé da letra fazia **todo** lançamento nascer PREVISTO — o usuário cadastraria dez gastos já pagos e teria que confirmar os dez, um a um, para a tela central sair do zero. O status deixa de ser pergunta e vira consequência do que a pessoa digitou |
+
+## Categorias sistêmicas (F9/F10/F13 — a lista que faltava)
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D13 | As sistêmicas são **três**, identificadas por `codigo` (F10): `TRANSFERENCIA`, `AJUSTE`, `NAO_CLASSIFICADO`, todas `tipo = AMBOS`. `PAGAMENTO_FATURA` fica **reservado** para a V11 | Só entra na lista o que o **código** referencia por `codigo` e não pode perder: `TRANSFERENCIA` porque F2 exige categoria para os dois lançamentos ligados; `AJUSTE` porque A13/T-05 fizeram do saldo de abertura um lançamento; `NAO_CLASSIFICADO` porque F11 torna a subcategoria opcional mas a **categoria obrigatória** — sem ela o bot do Telegram não teria destino válido para "gastei 50 no mercado". Sistêmica é cadeado, e cadeado só onde quebrar dói |
+| B-D14 | **F13 mantida ao pé da letra**: ambiente novo nasce só com as três sistêmicas. Sem kit inicial de categorias editáveis | A estrutura de gastos é pessoal. Entregar "Moradia, Lazer, Assinaturas" pronto economiza cinco minutos e impõe um vocabulário para sempre — quem não se reconhece nele arquiva tudo e recomeça, que é pior do que a lista vazia |
+| B-D15 | **`sistemica` e `entra_no_mapa` são colunas separadas.** `sistemica` = não pode editar (F10); `entra_no_mapa` = conta como gasto no relatório. Transferência e Ajuste: `entra_no_mapa = false`. Não classificado: **`true`** | Uma flag fazendo dois trabalhos é o defeito do I-01 se repetindo. A regra do mapa é `WHERE entra_no_mapa`, explícita — `WHERE NOT sistemica` só funcionaria por coincidência e **faria o gasto do bot sumir da tela em silêncio**, que é pior do que aparecer sem rótulo. Mover dinheiro entre contas suas não é gasto; gasto sem etiqueta continua sendo gasto |
+| B-D16 | `auth_criar_ambiente_inicial` (V5) passa a criar as sistêmicas na mesma transação; a V10 **retroalimenta** os ambientes já existentes | F13 promete que o ambiente nasce com as sistêmicas, mas a V5 só cria ambiente e vínculo — a promessa nunca foi cumprida por ninguém. Ambiente sem sistêmica não consegue receber transferência nem ajuste |
+
+## Mapa de gastos (T-07) — fechamento de P-T3, P-T5, P-T7
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D10 | **Previstos aparecem no mapa, visualmente distintos do realizado** (P-T7). Consequência de contrato: **cada célula devolve dois números, `realizado` e `previsto`**, nunca a soma pronta — idem para totais e para a linha de saldo | O quadro serve para planejar, não só para conferir o passado. Mas misturar num número só faria o total do mês significar duas coisas ao mesmo tempo. Se o servidor mandasse somado, a tela não teria como deixar claro o que ainda não saiu — quem separa é o endpoint, a tela só pinta |
+| B-D11 | **Período padrão = ano civil, com seletor de ano** (P-T3) | Bate com a planilha mental de qualquer pessoa e com o ciclo do IR. Doze colunas fixas dão cabeçalho estável e comparação direta entre anos, que a janela móvel de 12 meses não dá |
+| B-D12 | **O mapa tem três blocos: saídas, entradas e saldo do mês** (P-T5) | A pergunta que a família faz não é "quanto gastei", é "sobrou ou faltou". Custa um bloco a mais no mesmo endpoint (a agregação já varre os lançamentos; separar por `categoria.tipo` é filtro, não consulta nova) |
+
+## Autenticação e frontend
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D6 | **I-05 resolvido sem arbitrar**: F26 (gatilho) é mantida e o aspecto `ConfiguradorSessaoRls` passa a injetar `raspybank.canal` junto com `raspybank.usuario_id`. O gatilho lê os dois; ausência do canal grava `DESCONHECIDO` (B-A2) | O conflito existia porque o gatilho não sabia o canal — a razão original de auditar pelo serviço. Injetar o canal na mesma transação custa uma linha e **dissolve** o conflito em vez de escolher um lado. Preserva a virtude de F26: `UPDATE` feito por fora da aplicação grava autor nulo e se denuncia |
+| B-D7 | **`token_renovacao.ip_origem` passa a ser gravado** (I-16), a partir do request no login. Contrapartida assumida: a **tela de sessões ativas** entra no roteiro pós-mínimo | Coluna existe desde a V4 justificada por "a pessoa reconhecer suas sessões". Gravar sem a tela é dado pessoal parado; por isso a tela vira compromisso registrado, não intenção. Se ela não sair, a coluna volta à pauta para remoção |
+| B-D17 | **P-T6 fechado: React + Vite**, compilado para estáticos servidos pela própria aplicação | Escolha do dono do projeto, com o critério explicitado: o RaspyBank também serve para o tempo investido valer fora de casa, e React é o que o mercado usa. O argumento de bundle (~180 KB vs ~40 KB do Svelte) **não pesou** — numa rede local, para uma família, a diferença é invisível; foi levantado e descartado. Custo aceito: mais cerimônia por tela. Contrapartida: o código é escrito comentando o porquê dos padrões, para o projeto valer como estudo |
+
 # 5. Revisões registradas (R1–R6, sessão de requisitos)
 
 Decisões que substituíram decisões anteriores durante o próprio processo. O motivo da mudança é tão importante quanto a decisão final.
@@ -144,6 +185,12 @@ Decisões que substituíram decisões anteriores durante o próprio processo. O 
 ### R6 — Estratégia de token
 *Antes:* JWT de 24 horas. *Depois:* acesso 15 min + renovação rotativa 30 dias + teto 90 dias. *Motivo:* token longo não pode ser revogado; token curto sozinho inviabiliza o uso; o par resolve os dois.
 
+### R8 — F31 revogada: o lançamento não congela o nome da categoria *(26/07/2026)*
+*Antes:* lançamento guardava `categoria_nome`/`subcategoria_nome` copiados na criação, para que renomear a categoria não reescrevesse o passado. *Depois:* o lançamento guarda só os ids; o nome exibido vem sempre da categoria (B-D3), e categoria/subcategoria passam a ter apenas exclusão lógica (B-D4). *Motivo:* uma categoria é uma coisa, o nome dela é um rótulo — trocar o rótulo não cria outra categoria. Com o nome vindo do id, a cópia congelada só se justificaria se o id pudesse deixar de resolver; com arquivamento no lugar de exclusão, ele sempre resolve. O que sobraria seria uma segunda fonte para o mesmo dado, exatamente o defeito que o I-01 acabou de eliminar em `ambiente`.
+
+### R9 — F15 emendada: o status do lançamento deriva da data *(26/07/2026)*
+*Antes:* lançamento fora de cartão nasce sempre `PREVISTO`. *Depois:* nasce `REALIZADO` se a data de caixa é passada ou hoje, `PREVISTO` se é futura (B-D9); cartão segue nascendo `REALIZADO`. *Motivo:* F15 foi escrita na Fase 2, antes de existir tela. Como o mínimo aceitável não tem cartão, a regra literal fazia **todo** lançamento nascer previsto — cadastrar dez gastos já pagos exigiria dez confirmações antes de a tela central sair do zero. A intenção de F15 (separar planejado de acontecido) é preservada; o que muda é quem responde a pergunta — a data digitada, não um passo extra.
+
 ### R7 — Tenant do RLS passou de ambiente para usuário *(Fase 2)*
 *Antes:* `ambiente_id` como tenant, políticas por igualdade de campo. *Depois:* usuário como tenant, visibilidade por subquery sobre tabelas de vínculo. *Motivo:* o caso real de compartilhamento (ambiente pessoal, freelance, contas conjuntas visíveis em mais de um ambiente via `conta_ambiente` N:N) não se expressa por igualdade de um campo.
 
@@ -160,4 +207,5 @@ Decisões que substituíram decisões anteriores durante o próprio processo. O 
 | V7 | `auth_ambientes_do_usuario` | ✔ |
 | V8 | Normalização maiúsculas nos CHECKs; revogação de SELECT em `senha_hash`; filtro de excluídos em `app_ambientes_do_usuario`; `registro_auditoria.usuario_id` nullable | ✔ |
 | V9 | Operação `ACESSO` no `ck_auditoria_operacao`; UPDATE dos logins históricos | ✔ |
-| V10 | **Próxima** — domínio: `conta`, `conta_ambiente`, `cartao`, `cartao_emitido`, `fatura`. Validar cada trecho contra F1–F33 antes de aplicar | ✘ |
+| V10 | **Próxima** — domínio, fatia 1 (B-D1): `categoria`, `subcategoria`, `conta`, `conta_ambiente`, `lancamento`; políticas RLS das cinco; gatilhos de auditoria (F26 + canal, B-D6); outbox do lançamento (F28); sistêmicas (B-D13/B-D16); `DROP ambiente.status` (B-D5). Validar cada trecho contra F1–F33 e contra a seção 4d antes de aplicar | ✘ |
+| V11 | Domínio, fatia 2 (B-D1): `cartao`, `cartao_emitido`, `fatura`, `parcela`, `regra_recorrencia`. Sai junto da tela T-06. Resolve I-07 (estados da fatura) | ✘ |
