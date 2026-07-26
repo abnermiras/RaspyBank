@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>o inventario de funcoes SECURITY DEFINER ({@code docs/security-definer.md})
  *       confere com o banco real — funcao a mais e furo sem registro, funcao a
  *       menos e documentacao mentindo;</li>
- *   <li>RLS esta LIGADO nas cinco tabelas da fundacao.</li>
+ *   <li>RLS esta LIGADO em todas as tabelas que deveriam te-lo.</li>
  * </ul>
  */
 class MigracoesTest extends IntegracaoTest {
@@ -42,15 +42,31 @@ class MigracoesTest extends IntegracaoTest {
      * corrigido. Primeira captura real do Bloco C.</p>
      */
     private static final List<String> DEFINER_INVENTARIADAS = List.of(
+        // Fundacao e autenticacao (V3–V7)
         "app_ambientes_do_usuario",
         "auth_cadastrar_usuario",
         "auth_buscar_credenciais",
         "auth_criar_ambiente_inicial",
         "auth_registrar_evento",
-        "auth_ambientes_do_usuario");
+        "auth_ambientes_do_usuario",
+        // Dominio (V10). app_criar_conta e a primeira funcao de DOMINIO na
+        // lista, e por isso o criterio do inventario foi reescrito em
+        // 26/07/2026: o que justifica o furo e o impasse com a politica, nao a
+        // camada em que a operacao vive.
+        "app_contas_do_usuario",
+        "app_criar_conta",
+        // Gatilhos (V10). Precisam de DEFINER porque o registro que gravam tem
+        // de entrar mesmo quando o autor nao tem identidade valida — auditoria
+        // recusada pela politica seria o pior resultado possivel.
+        "fn_auditar",
+        "fn_publicar_evento_lancamento");
 
     private static final List<String> TABELAS_COM_RLS = List.of(
-        "usuario", "ambiente", "usuario_ambiente", "registro_auditoria", "outbox");
+        // Fundacao (V3)
+        "usuario", "ambiente", "usuario_ambiente", "registro_auditoria", "outbox",
+        // Dominio (V10). A regra da casa: tabela nova nasce com RLS ligado.
+        // Tabela de dominio sem politica e tabela que qualquer usuario le inteira.
+        "categoria", "subcategoria", "conta", "conta_ambiente", "lancamento");
 
     private Connection comoProprietario() throws SQLException {
         return DriverManager.getConnection(
@@ -96,7 +112,7 @@ class MigracoesTest extends IntegracaoTest {
     }
 
     @Test
-    @DisplayName("RLS ligado nas cinco tabelas da fundacao")
+    @DisplayName("RLS ligado nas dez tabelas: cinco da fundacao, cinco do dominio")
     void rlsLigadoNasTabelas() throws SQLException {
         try (Connection c = comoProprietario();
              PreparedStatement ps = c.prepareStatement(

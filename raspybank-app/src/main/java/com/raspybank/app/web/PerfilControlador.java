@@ -47,11 +47,19 @@ public class PerfilControlador {
         return resposta;
     }
 
+    /**
+     * O resumo NAO devolve mais um campo de status.
+     *
+     * <p>A V10 derrubou {@code ambiente.status} (decisao B-D5, inconsistencia
+     * I-01): a coluna nunca foi gravada por ninguem e concorria com
+     * {@code excluido_em}. Alem disso o campo aqui seria sempre o mesmo valor,
+     * porque {@code app_ambientes_do_usuario()} ja filtra os ambientes
+     * excluidos — quem chega nesta lista esta ativo por construcao.</p>
+     */
     private Map<String, Object> resumir(Ambiente a) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", a.getId());
         m.put("nome", a.getNome());
-        m.put("status", a.getStatus());
         return m;
     }
 }

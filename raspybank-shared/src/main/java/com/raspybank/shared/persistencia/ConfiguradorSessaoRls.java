@@ -12,7 +12,8 @@ import org.springframework.stereotype.Component;
 import java.util.UUID;
 
 /**
- * Informa ao Postgres quem esta conectado, no inicio de cada transacao.
+ * Informa ao Postgres quem esta conectado e por onde, no inicio de cada
+ * transacao.
  *
  * <p>Sem isto, as politicas de Row Level Security criadas na migracao V3 nao
  * teriam como saber quem e o usuario, e nenhuma linha seria visivel — o que,
@@ -53,23 +54,51 @@ public class ConfiguradorSessaoRls {
 
         ContextoRequisicao.usuarioId().ifPresent(this::definirUsuario);
         ContextoRequisicao.ambienteId().ifPresent(this::definirAmbiente);
+        definirCanal();
 
         return ponto.proceed();
     }
 
     private void definirUsuario(UUID usuarioId) {
-        definir("raspybank.usuario_id", usuarioId);
+        definir("raspybank.usuario_id", usuarioId.toString());
     }
 
     private void definirAmbiente(UUID ambienteId) {
-        definir("raspybank.ambiente_id", ambienteId);
+        definir("raspybank.ambiente_id", ambienteId.toString());
     }
 
-    private void definir(String chave, UUID valor) {
+    /**
+     * O canal, para o gatilho de auditoria da V10 (decisao B-D6).
+     *
+     * <h3>Por que isto existe</h3>
+     * A V2 registrou auditoria escrita pela camada de servico, com um motivo
+     * concreto: so a aplicacao sabe se a operacao veio da web ou do Telegram.
+     * A Fase 2 fechou F26 no sentido oposto — gatilho lendo o contexto do RLS.
+     * A inconsistencia I-05 ficou registrada meses esperando um vencedor.
+     *
+     * <p>A resolucao nao escolheu lado: removeu a razao do conflito. Se o
+     * canal viaja na mesma transacao em que o usuario ja viajava, o gatilho
+     * passa a saber tudo o que o servico sabia — e mantem a virtude que so o
+     * gatilho tem, de acusar quem mexeu por fora da aplicacao.</p>
+     *
+     * <h3>Por que sem {@code ifPresent}</h3>
+     * Diferente de usuario e ambiente, o canal nunca esta ausente:
+     * {@code ContextoRequisicao.canal()} devolve SISTEMA quando ninguem
+     * definiu. Isso e proposital e preserva uma distincao que a V8 criou —
+     * rotina interna grava SISTEMA, alteracao feita por fora da aplicacao
+     * (psql, migracao) nao passa por aqui e o gatilho grava DESCONHECIDO.
+     * Se este metodo pulasse a definicao, as duas viriam iguais e a auditoria
+     * perderia justamente o que ela deveria gritar.
+     */
+    private void definirCanal() {
+        definir("raspybank.canal", ContextoRequisicao.canal().name());
+    }
+
+    private void definir(String chave, String valor) {
         entityManager
             .createNativeQuery("SELECT set_config(:chave, :valor, true)")
             .setParameter("chave", chave)
-            .setParameter("valor", valor.toString())
+            .setParameter("valor", valor)
             .getSingleResult();
     }
 }

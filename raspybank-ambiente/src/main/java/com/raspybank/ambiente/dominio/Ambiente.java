@@ -5,8 +5,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -34,23 +32,22 @@ public class Ambiente {
     @Column(name = "nome", nullable = false)
     private String nome;
 
-    @Column(name = "status", nullable = false)
-    /**
-    * STRING manda o JPA gravar o name() do enum como texto — que é
-    * idêntico ao valor do CHECK ck_usuario_status, por construção.
-    * NUNCA ORDINAL: gravaria 0,1... e reordenar o enum corromperia
-    * silenciosamente os dados existentes.
-    */
-    @Enumerated(EnumType.STRING)
-    private StatusAmbiente status = StatusAmbiente.ATIVO;
-
     @Column(name = "criado_em", insertable = false, updatable = false)
     private OffsetDateTime criadoEm;
 
     @Column(name = "atualizado_em", insertable = false, updatable = false)
     private OffsetDateTime atualizadoEm;
 
-    /** Exclusao logica: nulo significa ativo. O historico financeiro e preservado. */
+    /**
+     * Unico mecanismo de ciclo de vida (B-D5): nulo significa ativo,
+     * preenchido significa arquivado, e anular reverte.
+     *
+     * <p>Ate a V10 existia tambem uma coluna {@code status} (ATIVO/INATIVO)
+     * que ninguem nunca gravou. Duas colunas respondendo a mesma pergunta
+     * garantem que alguma consulta vai checar so uma — foi a inconsistencia
+     * I-01, e a V10 derrubou a coluna. O historico financeiro e preservado
+     * nos dois casos: exclusao aqui e sempre logica.</p>
+     */
     @Column(name = "excluido_em")
     private OffsetDateTime excluidoEm;
 
@@ -67,7 +64,6 @@ public class Ambiente {
 
     public UUID getId()                     { return id; }
     public String getNome()                 { return nome; }
-    public StatusAmbiente getStatus()       { return status; }
     public OffsetDateTime getCriadoEm()     { return criadoEm; }
     public OffsetDateTime getExcluidoEm()   { return excluidoEm; }
 
