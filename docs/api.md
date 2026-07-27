@@ -86,8 +86,19 @@ Renomear é **ação leve** (B-D3): o nome é texto pendurado no id, então a tr
 ### `POST /api/categorias/{id}/arquivar` · `POST /api/categorias/{id}/desarquivar`
 Arquivada, a categoria some do seletor da T-08 e **continua nomeando o histórico inteiro** — é por isso que não existe exclusão (B-D4). **403** se sistêmica.
 
-### `POST /api/categorias/{id}/subcategorias` · `PUT /api/subcategorias/{id}` · `POST /api/subcategorias/{id}/arquivar`
-Mesmas regras. Não existe endpoint de sub-subcategoria: a estrutura tem dois níveis por decisão (F8), e a ausência do caminho é a garantia.
+### `POST /api/categorias/{id}/subcategorias` · `PUT /api/subcategorias/{id}` · `POST /api/subcategorias/{id}/arquivar` · `POST /api/subcategorias/{id}/desarquivar`
+Mesmas regras. **403** ao criar subcategoria em categoria sistêmica: `TRANSFERENCIA > Pix` não significa nada, e as três sistêmicas existem para o código achar, não para a pessoa organizar. Não existe endpoint de sub-subcategoria: a estrutura tem dois níveis por decisão (F8), e a ausência do caminho é a garantia.
+
+> `desarquivar` de subcategoria foi **acrescentado ao contrato em 26/07/2026**, ao implementar a fatia 1. Sem ele, arquivar uma subcategoria seria irreversível pela tela — o que contradiz B-D4, onde arquivar é justamente a alternativa reversível à exclusão. A categoria já tinha o par completo; a subcategoria tinha só metade, por omissão.
+
+### Códigos de erro desta seção
+
+| Código | Quando |
+|---|---|
+| `400` | `nome` vazio ou `tipo` fora de `ENTRADA`/`SAIDA`/`AMBOS`. Corpo traz `campos` |
+| `403` | Cadeado da sistêmica (F10), ou sessão sem ambiente ativo |
+| `404` | Id inexistente **ou de outro ambiente seu** (B-D21). Os dois casos respondem igual de propósito: distinguir viraria um oráculo sobre quais ids existem |
+| `409` | Nome já usado por categoria/subcategoria **ativa**. Índice parcial: arquivar e recriar com o mesmo nome é legítimo |
 
 ---
 
@@ -101,7 +112,8 @@ Query opcional: `?incluirEncerradas=true` (padrão `false`).
   "contas": [
     {
       "id": "0198...", "nome": "Conta conjunta", "natureza": "ATIVO",
-      "encerradaEm": null, "saldo": "1250.00",
+      "encerradaEm": null,
+      "saldo": "1250.00", "saldoComPrevistos": "980.00",
       "ambientes": [ { "id": "0198...", "nome": "Casa" } ]
     }
   ]
@@ -110,14 +122,33 @@ Query opcional: `?incluirEncerradas=true` (padrão `false`).
 
 `saldo` é **sempre calculado** (P1/F2), nunca uma coluna. `ambientes` mostra em quais ambientes a conta é visível — é o que torna B-D2 compreensível para quem olha a tela: dá para ver que a conta é compartilhada e entender por que o gasto foi para o ambiente ativo.
 
+> **Dois saldos, não um — mudança de 26/07/2026 (B-D26).** O contrato previa um `saldo` só. Ao implementar, ficou claro que ele repetiria o defeito que B-D10 evitou no mapa: somar o que já aconteceu com o que está agendado faz o número significar duas coisas ao mesmo tempo, e a tela não teria como separar depois. `saldo` é o dinheiro que está lá (só `REALIZADO`); `saldoComPrevistos` inclui o que já está agendado. É o `saldo` que precisa ser zero para encerrar.
+
+> **Limite conhecido (I-23).** As somas alcançam apenas os lançamentos que o RLS libera — os dos ambientes a que a pessoa pertence. Numa conta conjunta visível também no ambiente pessoal do outro, cada um vê um total diferente. Não foi corrigido de propósito: a correção exigiria uma função `SECURITY DEFINER` nova, e o critério B-D19 só a autoriza diante de impasse estrutural com a política — este é escolha de visibilidade, não impasse. Só passa a doer quando existir convite de usuário (I-08), que ainda não existe.
+
 ### `POST /api/contas`
 ```json
 { "nome": "Poupança", "natureza": "ATIVO", "saldoInicial": "3000.00" }
 ```
 `saldoInicial` é **opcional e não é campo da conta**: quando presente, o servidor cria um lançamento na categoria sistêmica `AJUSTE` (A13/B-D13). A tela deixa isso visível em vez de fingir que existe um campo mágico — o saldo continua sendo só a soma dos lançamentos.
 
-### `PUT /api/contas/{id}` · `POST /api/contas/{id}/encerrar`
-Conta não se exclui, se encerra (F7). Encerrada, some dos seletores e mantém o histórico. **409** ao encerrar conta com saldo diferente de zero — dinheiro não evapora; é preciso transferir ou ajustar antes.
+`saldoInicial` é validado como decimal de até duas casas **antes** de chegar ao banco: `numeric(15,2)` arredondaria `10.005` para `10.01` em silêncio. Aceita negativo — conta `PASSIVO` ou corrente no vermelho começam devendo, e o sinal escolhe o sentido do lançamento (o `valor` gravado segue positivo, F1).
+
+### `PUT /api/contas/{id}` · `POST /api/contas/{id}/encerrar` · `POST /api/contas/{id}/reabrir`
+Conta não se exclui, se encerra (F7). Encerrada, some dos seletores e mantém o histórico. **409** ao encerrar conta com saldo diferente de zero — dinheiro não evapora; é preciso transferir ou ajustar antes. A checagem olha o `saldo` (realizado): previsto é agenda, não dinheiro.
+
+> `reabrir` foi **acrescentado ao contrato em 26/07/2026**, pelo mesmo motivo do `desarquivar` de subcategoria. Encerrar é a alternativa *reversível* à exclusão; sem a volta, um clique errado tiraria a conta dos seletores para sempre, e o único contorno seria criar outra — partindo o histórico em duas.
+
+As escritas respondem na **mesma forma** do `GET`, com saldo e vínculos recalculados. Devolver uma forma reduzida obrigaria a tela a ter dois caminhos de leitura para o mesmo objeto, e o segundo é sempre o que fica desatualizado.
+
+### Códigos de erro desta seção
+
+| Código | Quando |
+|---|---|
+| `400` | `nome` vazio, `natureza` fora de `ATIVO`/`PASSIVO`, `saldoInicial` malformado |
+| `403` | Sessão sem ambiente ativo |
+| `404` | Id inexistente ou de conta não vinculada ao ambiente ativo (B-D21) |
+| `409` | Encerrar conta com saldo diferente de zero |
 
 ---
 
@@ -160,8 +191,20 @@ Seis campos, e três ausências que são decisão, não esquecimento:
 
 `dataCompetencia` é opcional e, ausente, copia `dataCaixa` (F14). **403** se a conta não pertencer ao ambiente ativo — a restrição de B-D2 é conferida no banco, e o 403 é a tradução dela.
 
-### `PUT /api/lancamentos/{id}` · `DELETE /api/lancamentos/{id}`
-Lançamento é editável e excluível **com auditoria** (F16), e a auditoria é por gatilho lendo o contexto do RLS + o canal (F26 / B-D6). `PUT` aceita `situacao` explícito — a derivação de B-D9 vale na criação; corrigir depois é legítimo e é o que a lista da T-08 oferece.
+### `GET /api/lancamentos/{id}` · `PUT /api/lancamentos/{id}` · `DELETE /api/lancamentos/{id}`
+Lançamento é editável e excluível **com auditoria** (F16), e a auditoria é por gatilho lendo o contexto do RLS + o canal (F26 / B-D6). `PUT` aceita `situacao` explícito — a derivação de B-D9 vale na criação; corrigir depois é legítimo e é o que a lista da T-08 oferece. `PUT` é substituição completa: trocar a categoria **zera a subcategoria**, porque ela pertencia à anterior e adivinhar uma equivalente seria inventar dado. `DELETE` responde **204**.
+
+> `GET /api/lancamentos/{id}` foi acrescentado em 26/07/2026: as escritas respondem na mesma forma da lista, e ler de volta depois de gravar é o único jeito de a tela receber a classificação resolvida sem montá-la por conta própria.
+
+### Códigos de erro desta seção
+
+| Código | Quando |
+|---|---|
+| `400` | `valor` negativo ou com mais de duas casas, campo obrigatório ausente, `mes` malformado |
+| `403` | Categoria não aceita o sentido (F12); categoria `AMBOS` sem `tipo`; subcategoria de outra categoria (F11); **conta fora do ambiente ativo** (B-D2) |
+| `404` | Lançamento, categoria ou subcategoria inexistente, ou de outro ambiente seu (B-D21) |
+
+O 403 da conta fora do ambiente é a **tradução da chave composta** `(ambiente_id, conta_id) → conta_ambiente`: o banco recusaria de qualquer forma, mas diria apenas que uma restrição falhou. A frase existe para a tela ter o que mostrar.
 
 ---
 
@@ -218,7 +261,8 @@ Regras de construção:
 - **`subcategoriaId: null`** é a linha "(sem subcategoria)", legítima porque F11 torna a subcategoria opcional.
 - **Só entram categorias com `entraNoMapa = true`** (B-D15). Transferência entre contas próprias e ajuste de saldo ficam de fora; "Não classificado" fica **dentro** — é gasto real sem rótulo, e escondê-lo faria o total mentir para baixo.
 - **Mês da célula = mês de `dataCaixa`** (P-T2), e `dataCaixa` é `date` (B-D8), então o mês não depende de fuso.
-- **Escopo**: lançamentos do ambiente ativo (F33 / B-D2). Nenhum filtro por ambiente aparece no SQL de aplicação — quem recorta é o RLS.
+- **Escopo**: lançamentos do ambiente ativo (F33 / B-D2). ~~Nenhum filtro por ambiente aparece no SQL de aplicação — quem recorta é o RLS.~~ **Corrigido em 26/07/2026:** o filtro por `ambiente_id` **está** na consulta, e precisa estar. O tenant do RLS é o usuário (R7), então a política libera os lançamentos de *todos* os ambientes da pessoa — correto para segurança, errado para a tela. É a regra B-D21: a RLS decide o que você pode ver, o `ambienteId` decide o que você quer ver agora.
+- **Ano ausente** → ano corrente. A tela abre no ano em que a pessoa está.
 - **Nada é persistido** (P1). O quadro é calculado a cada chamada; se isso doer um dia, a resposta é cache com invalidação explícita, nunca coluna de total.
 
 ---

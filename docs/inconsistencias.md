@@ -152,6 +152,16 @@ Contrapartida de B-D7: `token_renovacao.ip_origem` passou a ser gravado, e grava
 
 **Quando resolver:** depois do mínimo aceitável, antes de qualquer exposição à internet. Se for descartada, o I-16 reabre para remover a coluna.
 
+## I-23 — O saldo de conta compartilhada pode ser parcial *(aberta — achada em 26/07/2026, fatia 2)*
+
+O saldo é a soma dos lançamentos, e o RLS só libera os dos ambientes a que a pessoa pertence. Numa conta conjunta visível no ambiente "Casa" **e** no ambiente pessoal de cada um, um lançamento que a Alice fez no ambiente pessoal dela é invisível para o Bruno — e o saldo que ele vê é maior do que o dinheiro que existe.
+
+**Por que não foi corrigida agora:** a correção exigiria uma função `SECURITY DEFINER` somando por fora da política, e o critério B-D19 só a autoriza diante de **impasse estrutural** — quando a linha só se torna visível por um vínculo que ainda não pode existir. Aqui não há impasse: há uma escolha de visibilidade. Furar a política por conveniência é exatamente o que B-D19 passou a proibir.
+
+**Quando resolver:** junto de I-08 (entrada de usuário em ambiente existente). Enquanto não houver convite, não há segundo usuário para divergir, e o número está certo para todo mundo que existe hoje.
+
+**Alternativa a avaliar na hora:** em vez de somar por fora, marcar a conta como "saldo parcial neste ambiente" quando ela tiver vínculo com ambiente que o usuário não enxerga — dizer a verdade sobre o recorte é melhor do que furar a política para escondê-lo.
+
 ---
 
 # Situação em 26/07/2026
@@ -167,6 +177,7 @@ Contrapartida de B-D7: `token_renovacao.ip_origem` passou a ser gravado, e grava
 | I-07 | Estados da Fatura | Desenho da V11 |
 | I-08 | Entrada de usuário em ambiente existente (convite) | Depois do mínimo, antes de uso compartilhado real |
 | I-18 | Tela de sessões ativas | Depois do mínimo, antes de exposição à internet |
+| I-23 | Saldo parcial em conta compartilhada entre ambientes que o usuário não enxerga | Junto de I-08. Sem convite, não há segundo usuário para divergir |
 | P-T8 | Token em `localStorage` × cookie `httpOnly` (`mapa-telas.md`) | Antes de expor à internet |
 
 Nenhum dos abertos bloqueia a V10.

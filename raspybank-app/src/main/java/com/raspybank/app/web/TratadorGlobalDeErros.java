@@ -1,5 +1,8 @@
 package com.raspybank.app.web;
 
+import com.raspybank.shared.erro.ConflitoDeEstado;
+import com.raspybank.shared.erro.OperacaoNaoPermitida;
+import com.raspybank.shared.erro.RecursoNaoEncontrado;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -25,8 +28,9 @@ import java.util.Map;
  *
  * <ul>
  *   <li><b>400</b> — corpo invalido ou validacao de campos</li>
+ *   <li><b>403</b> — operacao valida em forma e proibida por regra de dominio</li>
  *   <li><b>404</b> — caminho ou recurso inexistente</li>
- *   <li><b>409</b> — conflito com estado existente (e-mail ja cadastrado)</li>
+ *   <li><b>409</b> — conflito com estado existente (e-mail ou nome ja usado)</li>
  *   <li><b>500</b> — erro nosso; o detalhe vai para o log, nunca para fora</li>
  * </ul>
  *
@@ -79,6 +83,45 @@ public class TratadorGlobalDeErros {
             "erro", "Recurso nao encontrado"));
     }
 
+    /**
+     * Regra de dominio violada — <b>403</b>.
+     *
+     * <p>A mensagem vem da entidade e vai inteira para o cliente, ao contrario
+     * do 500. E deliberado: aqui a frase diz o que a pessoa nao pode fazer
+     * ("categoria sistemica nao se renomeia"), que e informacao acionavel e
+     * nao detalhe interno.</p>
+     */
+    @ExceptionHandler(OperacaoNaoPermitida.class)
+    public ResponseEntity<Map<String, String>> naoPermitida(OperacaoNaoPermitida e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+            "erro", e.getMessage()));
+    }
+
+    /**
+     * Recurso inexistente ou de outro ambiente — <b>404</b> nos dois casos.
+     *
+     * <p>Ver {@link RecursoNaoEncontrado}: distinguir "nao existe" de "nao e
+     * seu" transformaria a API num oraculo sobre quais ids existem.</p>
+     */
+    @ExceptionHandler(RecursoNaoEncontrado.class)
+    public ResponseEntity<Map<String, String>> naoEncontrado(RecursoNaoEncontrado e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+            "erro", e.getMessage()));
+    }
+
+    /**
+     * Estado atual impede a operacao — <b>409</b>.
+     *
+     * <p>Diferente do 403: ali a operacao nunca sera possivel; aqui ela passa
+     * a ser assim que o estado mudar. Encerrar conta com saldo funciona depois
+     * que o dinheiro sair — e a mensagem diz isso.</p>
+     */
+    @ExceptionHandler(ConflitoDeEstado.class)
+    public ResponseEntity<Map<String, String>> conflito(ConflitoDeEstado e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+            "erro", e.getMessage()));
+    }
+
     // -------------------------------------------------------------------------
     /**
      * Apanha qualquer excecao e procura, na cadeia de causas, uma violacao de
@@ -99,6 +142,19 @@ public class TratadorGlobalDeErros {
             if (mensagem.contains("ux_usuario_email")) {
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
                     "erro", "Ja existe uma conta com este e-mail"));
+            }
+            // Os dois indices sao PARCIAIS: so valem entre as nao arquivadas.
+            // Arquivar "Mercado" e criar outra "Mercado" e legitimo — a
+            // primeira segue nomeando o passado, a segunda recomeca a
+            // contagem. O conflito so existe entre duas ativas, que deixariam
+            // o seletor da T-08 com duas linhas identicas.
+            if (mensagem.contains("ux_categoria_nome")) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "erro", "Ja existe uma categoria ativa com este nome"));
+            }
+            if (mensagem.contains("ux_subcategoria_nome")) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "erro", "Ja existe uma subcategoria ativa com este nome nesta categoria"));
             }
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
                 "erro", "Registro duplicado"));

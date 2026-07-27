@@ -48,6 +48,10 @@
             <groupId>com.raspybank</groupId>
             <artifactId>raspybank-auditoria</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.raspybank</groupId>
+            <artifactId>raspybank-lancamento</artifactId>
+        </dependency>
 
         <!-- Servidor web embutido e camada REST -->
         <dependency>

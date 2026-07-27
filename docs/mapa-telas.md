@@ -1,6 +1,6 @@
 # RaspyBank — Mapa de Telas
 
-**Versão:** 1.0 (todas as perguntas fechadas)
+**Versão:** 1.1 (todas as perguntas fechadas; ordem de execução da API definida em §6)
 **Data:** 26 de julho de 2026
 **Regra deste documento:** aqui vivem as decisões de PRODUTO das telas — o que existe, o que mostra, o que fica de fora. Pergunta sem resposta vira `P-T##` na seção 5 e não trava o resto; respondida, vira decisão com a mesma numeração. Decisão técnica de implementação (stack, biblioteca) também é registrada aqui enquanto não houver documento próprio de frontend.
 
@@ -164,7 +164,22 @@ Todas as `P-T` estão decididas, exceto **P-T8** (token em `localStorage` × coo
 
 1. **Migração V10** (migração primeiro, código depois — P3), crescendo os testes do Bloco C: fumaça de RLS para as tabelas novas e regras de domínio puras (padrão B-C3) para as somas do mapa. Lista de tabelas em `decisoes.md` §6; regras novas em `decisoes.md` §4d.
 2. **`docs/api.md`** — contrato dos endpoints da V10, escrito antes do código. *(Feito na mesma sessão.)*
-3. **API V10** contra o contrato.
-4. **SPA em React + Vite**, começando por T-01/T-02/T-03 (portando o protótipo) e indo para T-04/T-05/T-08/T-07. Quando a T-03 real existir, os três arquivos de `static/` morrem — ver §5b.
+3. **API V10** contra o contrato, em fatias — ordem confirmada em 26/07/2026, com a API inteira **antes** de qualquer tela:
+
+   | Fatia | O quê | Estado |
+   |---|---|---|
+   | 0 | Módulo `raspybank-lancamento` (B-D20): cinco entidades, cinco repositórios, enums, regra de situação (B-D22). 27 testes puros | ✔ |
+   | 1 | API de categorias e subcategorias (T-04): 9 endpoints, vocabulário de erro em `shared` (403/404), 12 testes de API | ✔ |
+   | 2 | API de contas (T-05): 5 endpoints, saldo calculado em dois números (B-D26), saldo inicial virando lançamento em `AJUSTE`, 11 testes de API | ✔ |
+   | 3 | API de lançamentos (T-08): 5 endpoints, as duas derivações (situação pela data, tipo pela categoria), exclusão física auditada, 15 testes de API | ✔ |
+   | 4 | API do mapa de gastos (T-07): uma varredura, três blocos, doze células sempre, 10 testes de API | ✔ |
+   | 5 | Montar React + Vite e portar T-01/T-02/T-03 | ⏳ 27/07/2026 — **bloqueada:** `node`/`npm` não instalados na VM |
+   | 6 | Telas novas: T-04, T-05, T-08, T-07 | |
+
+   **Backend do mínimo aceitável fechado em 26/07/2026**: 24 endpoints, 136 testes verdes, tudo contra o contrato de `docs/api.md` — que foi corrigido três vezes quando a implementação mostrou que ele errava (dois saldos em vez de um, `desarquivar`/`reabrir` ausentes, e a frase errada sobre o RLS recortar ambiente sozinho).
+
+   O custo aceito da ordem: a primeira tela nova só aparece na fatia 6. Em troca, o contrato inteiro é verificado de uma vez e o React é montado uma vez só, sem interromper.
+
+4. **SPA em React + Vite** (fatias 5 e 6), começando por T-01/T-02/T-03 (portando o protótipo) e indo para T-04/T-05/T-08/T-07. Quando a T-03 real existir, os três arquivos de `static/` morrem — ver §5b. **Pré-requisito de ambiente:** `node` e `npm` ainda não existem na VM.
 
 O item "esboço visual das T-03/T-07" saiu da lista: o protótipo navegável (§5b) já validou a T-03, e a T-07 ficou especificada célula a célula em `docs/api.md`, que é mais preciso que rabisco.

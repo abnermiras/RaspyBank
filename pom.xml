@@ -53,6 +53,7 @@
         <module>raspybank-identidade</module>
         <module>raspybank-ambiente</module>
         <module>raspybank-auditoria</module>
+        <module>raspybank-lancamento</module>
         <module>raspybank-app</module>
     </modules>
 
@@ -96,6 +97,11 @@
             <dependency>
                 <groupId>com.raspybank</groupId>
                 <artifactId>raspybank-auditoria</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.raspybank</groupId>
+                <artifactId>raspybank-lancamento</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

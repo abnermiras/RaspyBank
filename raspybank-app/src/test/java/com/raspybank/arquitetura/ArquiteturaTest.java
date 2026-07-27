@@ -23,8 +23,10 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * hora, dizendo exatamente qual classe importou o que nao devia. E a diferenca
  * entre uma fronteira real e uma fronteira que existe so no diagrama.</p>
  *
- * <p><b>Ao criar um novo contexto</b> (lancamento, cartao, classificacao),
- * acrescente-o na constante CONTEXTOS e adicione o teste correspondente.</p>
+ * <p><b>Ao criar um novo contexto</b> (cartao, classificacao), declare-o como
+ * constante abaixo, adicione o teste de isolamento correspondente e
+ * acrescente-o na lista dos testes ja existentes — inclusive nos deles, para
+ * que a proibicao valha nos dois sentidos.</p>
  */
 @DisplayName("Fronteiras entre modulos")
 class ArquiteturaTest {
@@ -34,6 +36,7 @@ class ArquiteturaTest {
     private static final String IDENTIDADE = "com.raspybank.identidade..";
     private static final String AMBIENTE   = "com.raspybank.ambiente..";
     private static final String AUDITORIA  = "com.raspybank.auditoria..";
+    private static final String LANCAMENTO = "com.raspybank.lancamento..";
 
     private static JavaClasses classes;
 
@@ -56,7 +59,7 @@ class ArquiteturaTest {
     void identidadeIsolada() {
         noClasses()
             .that().resideInAPackage(IDENTIDADE)
-            .should().dependOnClassesThat().resideInAnyPackage(AMBIENTE, AUDITORIA, APP)
+            .should().dependOnClassesThat().resideInAnyPackage(AMBIENTE, AUDITORIA, LANCAMENTO, APP)
             .check(classes);
     }
 
@@ -65,7 +68,7 @@ class ArquiteturaTest {
     void ambienteIsolado() {
         noClasses()
             .that().resideInAPackage(AMBIENTE)
-            .should().dependOnClassesThat().resideInAnyPackage(IDENTIDADE, AUDITORIA, APP)
+            .should().dependOnClassesThat().resideInAnyPackage(IDENTIDADE, AUDITORIA, LANCAMENTO, APP)
             .check(classes);
     }
 
@@ -74,7 +77,20 @@ class ArquiteturaTest {
     void auditoriaIsolada() {
         noClasses()
             .that().resideInAPackage(AUDITORIA)
-            .should().dependOnClassesThat().resideInAnyPackage(IDENTIDADE, AMBIENTE, APP)
+            .should().dependOnClassesThat().resideInAnyPackage(IDENTIDADE, AMBIENTE, LANCAMENTO, APP)
+            .check(classes);
+    }
+
+    @Test
+    @DisplayName("Lancamento nao conhece outros contextos")
+    void lancamentoIsolado() {
+        // Este e o contexto mais tentado a furar a fronteira: o lancamento
+        // referencia usuario (criado_por, responsavel_id) e ambiente, e seria
+        // comodo importar as entidades. Ele guarda o identificador dos dois —
+        // e por isso que Categoria tem 'UUID ambienteId' e nao 'Ambiente'.
+        noClasses()
+            .that().resideInAPackage(LANCAMENTO)
+            .should().dependOnClassesThat().resideInAnyPackage(IDENTIDADE, AMBIENTE, AUDITORIA, APP)
             .check(classes);
     }
 
@@ -91,7 +107,7 @@ class ArquiteturaTest {
         noClasses()
             .that().resideInAPackage(SHARED)
             .should().dependOnClassesThat()
-            .resideInAnyPackage(IDENTIDADE, AMBIENTE, AUDITORIA, APP)
+            .resideInAnyPackage(IDENTIDADE, AMBIENTE, AUDITORIA, LANCAMENTO, APP)
             .check(classes);
     }
 
