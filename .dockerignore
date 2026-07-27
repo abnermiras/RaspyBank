@@ -11,3 +11,10 @@ infra/
 *.md
 .vscode/
 .idea/
+
+# A saída do build local do frontend não entra no contexto: a imagem constrói o
+# seu próprio frontend, num estágio dedicado. Se estes arquivos entrassem, uma
+# build local esquecida poderia ir para a imagem no lugar da recém-compilada.
+raspybank-app/src/main/resources/static/
+raspybank-web/node_modules/
+raspybank-web/dist/

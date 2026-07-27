@@ -173,13 +173,107 @@ Todas as `P-T` estão decididas, exceto **P-T8** (token em `localStorage` × coo
    | 2 | API de contas (T-05): 5 endpoints, saldo calculado em dois números (B-D26), saldo inicial virando lançamento em `AJUSTE`, 11 testes de API | ✔ |
    | 3 | API de lançamentos (T-08): 5 endpoints, as duas derivações (situação pela data, tipo pela categoria), exclusão física auditada, 15 testes de API | ✔ |
    | 4 | API do mapa de gastos (T-07): uma varredura, três blocos, doze células sempre, 10 testes de API | ✔ |
-   | 5 | Montar React + Vite e portar T-01/T-02/T-03 | ⏳ 27/07/2026 — **bloqueada:** `node`/`npm` não instalados na VM |
-   | 6 | Telas novas: T-04, T-05, T-08, T-07 | |
+   | 5 | Montar React + Vite e portar T-01/T-02/T-03 | ✔ 27/07/2026 |
+   | 6 | Telas novas: T-04, T-05, T-08, T-07 | ✔ 27/07/2026 |
 
    **Backend do mínimo aceitável fechado em 26/07/2026**: 24 endpoints, 136 testes verdes, tudo contra o contrato de `docs/api.md` — que foi corrigido três vezes quando a implementação mostrou que ele errava (dois saldos em vez de um, `desarquivar`/`reabrir` ausentes, e a frase errada sobre o RLS recortar ambiente sozinho).
 
    O custo aceito da ordem: a primeira tela nova só aparece na fatia 6. Em troca, o contrato inteiro é verificado de uma vez e o React é montado uma vez só, sem interromper.
 
-4. **SPA em React + Vite** (fatias 5 e 6), começando por T-01/T-02/T-03 (portando o protótipo) e indo para T-04/T-05/T-08/T-07. Quando a T-03 real existir, os três arquivos de `static/` morrem — ver §5b. **Pré-requisito de ambiente:** `node` e `npm` ainda não existem na VM.
+4. **SPA em React + Vite** (fatias 5 e 6), começando por T-01/T-02/T-03 (portando o protótipo) e indo para T-04/T-05/T-08/T-07. Quando a T-03 real existir, os três arquivos de `static/` morrem — ver §5b. **Pré-requisito de ambiente resolvido em 27/07/2026:** `node v22.22.1` e `npm 9.2.0`, instalados do archive congelado do Ubuntu 26.04 — sem repositório de terceiro e sem contato com o registry do npm. O frontend vive em `raspybank-web/`, fora do Maven de propósito: o plugin que integraria o build baixaria um binário do Node da internet a cada compilação. As dependências são resolvidas com corte por data (`NPM_CORTE` no Makefile) e instaladas com `npm ci --ignore-scripts`. Ver §7.
 
 O item "esboço visual das T-03/T-07" saiu da lista: o protótipo navegável (§5b) já validou a T-03, e a T-07 ficou especificada célula a célula em `docs/api.md`, que é mais preciso que rabisco.
+
+---
+
+## 7. Política de dependências do frontend (27/07/2026)
+
+**A regra, definida pelo Abner:** só entra no projeto o que está estável há **mais de uma semana**. Nada publicado ou promovido **no dia** da instalação, e isso vale para dependência transitiva, não só para o pacote digitado no comando.
+
+**Por que a regra é essa e não "auditar cada pacote".** O padrão dos ataques de cadeia de suprimentos no npm — a família Shai-Hulud, ativa de setembro/2025 a maio/2026, com o código do worm vazado em meados de maio e clones em circulação — é uma versão maliciosa publicada e retirada em poucas horas. Uma trava de idade derruba quase a classe inteira **sem depender de alguém reconhecer o pacote malicioso**, que é a parte que ninguém acerta de forma confiável.
+
+**Como a regra é aplicada, em mecanismo e não em disciplina:**
+
+| Controle | Onde vive | O que impede |
+|---|---|---|
+| `NPM_CORTE = 2026-07-17` | `Makefile` | resolução pegar versão recém-publicada |
+| `--package-lock-only` na resolução | comando de atualização | baixar código antes de fixar o que será baixado |
+| `package-lock.json` versionado | repositório | deriva silenciosa de versão |
+| `npm ci` (nunca `npm install`) | `make web-deps` | instalar fora do lock; confere hash de integridade |
+| `--ignore-scripts` | `make web-deps` | hooks `preinstall`/`install`/`postinstall` |
+| build fora do Maven | `Makefile` | `frontend-maven-plugin` baixar binário do Node a cada build |
+
+Nunca usar `npm create vite@latest` nem qualquer `@latest`: é literalmente "me dê o que subiu hoje".
+
+**Estado verificado em 27/07/2026:** 54 pacotes, 54 hashes de integridade, todos vindos de `registry.npmjs.org`, e **nenhum deles pede script de instalação** — `--ignore-scripts` custa zero aqui.
+
+### Falha conhecida aceita — `react-router-dom` 7.18.1
+
+O `npm audit` acusa duas falhas altas, e elas **ficam**. O motivo:
+
+| Versão | Advisories | Aplicáveis a nós |
+|---|---|---|
+| 7.11.0 | 14 | sim — open redirect e XSS em `<Link>`/`useNavigate` atingem SPA |
+| **7.18.1** | 1 | **não** — CSRF em modo RSC, e não há runtime de servidor do React Router aqui |
+
+Descer para a 7.11.0 zeraria o relatório e **pioraria** a segurança real. A escolha é deliberada: um `npm audit` limpo por construção vale mais como alarme, mas não ao preço de aceitar 14 falhas que de fato nos atingem. Revisar quando sair uma versão fora da faixa 7.12.0–8.2.0.
+
+---
+
+## 8. Portagem do protótipo para React (27/07/2026, fatia 5)
+
+As T-01/T-02/T-03 saíram do protótipo em JavaScript puro e viraram SPA. O que **mudou de comportamento**, de propósito:
+
+- **Rotas de verdade** (`/entrar`, `/mapa`) no lugar de esconder e mostrar `<div>`. A pessoa ganha botão voltar, endereço para guardar nos favoritos e recarga sem cair no login. Foi por isso que o `react-router` entrou — é a única dependência do projeto além do próprio React.
+- **Estado de espera explícito.** Abrir o app com token guardado agora mostra "Carregando…" enquanto o servidor confere a sessão. O protótipo piscava o cartão de login nesse intervalo, o que sugeria que a sessão havia caído quando ela não havia.
+- **Frase do menu corrigida.** O protótipo dizia que os itens acinzentados "aguardam a V10"; a V10 ficou pronta em 26/07. O que falta é a tela, na fatia 6.
+
+O que **não** mudou, também de propósito: as três chaves de `localStorage` são as mesmas, então quem estiver com sessão aberta quando a SPA substituir os arquivos de `static/` continua logado.
+
+**Verificado de ponta a ponta em 27/07/2026**, com backend real e tudo passando pelo proxy do Vite: cadastro 201, e-mail duplicado 409, senha errada 401 com mensagem vaga, validação 400 com o mapa `campos`, login 200, `/api/perfil` devolvendo ambiente e canal, troca de ambiente 200 com token novo, logout 200.
+
+**Achado sobre o logout, sem defeito:** o token de acesso continua válido depois do logout — ele vence sozinho em 15 minutos. O que o logout revoga é a **renovação**, e isso foi confirmado (401 ao tentar renovar depois). Como o cliente apaga o `localStorage` ao sair, não há exposição prática. Vale lembrar disso antes de alguém "consertar" o que não está quebrado.
+
+**O protótipo em `raspybank-app/src/main/resources/static/` ainda está lá e ainda é o que o Spring serve.** Ele só morre quando o `outDir` do Vite passar a apontar para aquela pasta — decisão da fatia 6, junto com as telas novas.
+
+---
+
+## 9. Telas da fatia 6 (27/07/2026)
+
+As quatro telas do mínimo aceitável existem. O que cada uma **recusou** fazer é o que vale registrar:
+
+**T-04 — Categorias.** As sistêmicas aparecem **com cadeado**, não escondidas: quem procurasse "Transferência" e não a encontrasse concluiria que sumiu. `sistemica` e `entraNoMapa` são lidos como as duas perguntas diferentes que B-D15 separou — o primeiro desenha o cadeado, o segundo vira a etiqueta "fora do mapa".
+
+**T-05 — Contas.** O `saldoComPrevistos` só aparece **quando difere** do `saldo`; repetido, o número viraria ruído. O formulário diz em texto que o saldo inicial vira um lançamento em `Ajuste`, em vez de fingir um campo mágico — o saldo continua sendo só a soma dos lançamentos.
+
+**T-08 — Lançamentos.** A tela **não reimplementa** as duas derivações. A situação é *mostrada* enquanto a pessoa escolhe a data ("nasce como previsto"), mas o campo só é enviado na edição, onde corrigir é legítimo. O campo `tipo` só aparece quando a categoria é `AMBOS` — o único caso em que o servidor não decide sozinho. Duplicar essas regras criaria uma segunda fonte da verdade, e a segunda é sempre a que envelhece.
+
+**T-07 — Mapa de gastos.** Três blocos, doze colunas sempre, e o previsto numa segunda linha da célula, menor e noutra cor. A tela **nunca soma** realizado com previsto: é o B-D10 desenhado. As células são reordenadas por mês na chegada — o contrato promete doze, não promete ordem, e tabela de doze colunas montada fora de ordem erra em silêncio.
+
+**Verificado com dados reais em 27/07/2026:** três categorias sistêmicas nascendo com o ambiente e com o `entraNoMapa` correto; 403 ao renomear sistêmica; 409 em nome duplicado; saldo inicial de `3000,00` virando lançamento em `Ajuste`; situação derivando da data; os dois saldos divergindo em `250,00` por causa de um lançamento futuro; e o mapa devolvendo `5200,00 − 910,50 = 4289,50` com o `Ajuste de saldo` **fora** da soma.
+
+### O que ficou de fora, e por quê
+
+**O protótipo em `static/` continua vivo, e o `outDir` do Vite continua em `dist/`.** Matar o protótipo agora exigiria decidir *como o build do frontend chega à imagem Docker* — se o Vite escreve direto em `resources/static/` (e aí artefato de build entra no controle de versão, ou precisa ser ignorado) ou se o `Dockerfile` copia de `dist/`. É wiring de implantação, não tela, e resolver pela metade seria pior que não resolver. Fica como o primeiro item do próximo passo.
+
+---
+
+## 10. A SPA passou a ser servida pelo Spring (27/07/2026) — fim do protótipo
+
+Os três arquivos de `raspybank-app/src/main/resources/static/` foram **removidos**. Aquela pasta deixou de ser fonte e virou **destino do build do Vite**, e por isso entrou no `.gitignore`: versionar saída de build criaria duas cópias do mesmo código, e a segunda envelheceria em silêncio até alguém depurar a versão errada.
+
+Três problemas apareceram no caminho, e nenhum era "copiar arquivo":
+
+**1. Nome de asset com hash × lista explícita de segurança.** A `SegurancaConfig` liberava arquivo por arquivo, sem curinga, de propósito. O Vite gera `index-DkTzU8dD.css`, e o hash muda a cada build — lista explícita ficaria errada no build seguinte, com a tela em branco como sintoma. Foi aberto **um único curinga**, `/assets/**`, e ele é seguro pelo motivo que a regra original protegia: nenhum controlador mora lá. Todo endpoint nasce sob `/api/`, então controlador novo continua nascendo protegido.
+
+**2. Recarregar a página numa rota do React dava 401.** `/contas` só existe no navegador; recarregar manda o caminho ao Spring, que não tinha controlador ali. Nasceu o `SpaControlador`, e a lista de rotas nele é **explícita**. Um curinga "tudo que não for `/api/**` devolve index.html" funcionaria e esconderia todo erro de digitação: `/api/lancamentoss` passaria a devolver a tela em vez de 404, e o defeito apareceria como "a tela não carrega", longe da causa.
+
+**3. O `Dockerfile` não conhecia o `raspybank-lancamento`.** Defeito real desde a fatia 0, invisível porque ninguém rodou `make gate` desde então.
+
+### O `make gate` estava quebrado, e não era só o módulo
+
+Corrigido o módulo, a imagem ainda falhava: os testes de integração sobem um Postgres via Testcontainers, que precisa do `/var/run/docker.sock` — **e não há daemon do Docker dentro de um `docker build`**. Isso quebrou quando o primeiro teste de integração nasceu, no Bloco C.
+
+A imagem passou a rodar só os testes que **podem** rodar lá (27 puros + 9 de arquitetura), e o **`make gate` agora depende do `make build`**: a suíte inteira roda aqui fora, com Docker disponível, antes de qualquer imagem ser construída. O gate só é honesto assim.
+
+**Verificado em 27/07/2026:** 138 testes verdes; imagem construída e no ar; `/`, `/entrar`, `/mapa`, `/contas` devolvendo a SPA; `/rota-inventada` e `/api/perfil` em 401; `/assets/inventado.js` em 404. O hash do bundle dentro da imagem é **idêntico** ao do build local — o `npm ci` a partir do lock é reproduzível.

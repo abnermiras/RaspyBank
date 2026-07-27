@@ -1,0 +1,575 @@
+/* ==========================================================================
+   RaspyBank — estilo do prototipo de telas
+   Uma folha so, sem framework e sem build: e proposital enquanto a escolha
+   da SPA (P-T6) esta em aberto. Nada aqui deve virar fundacao permanente.
+   ========================================================================== */
+
+:root {
+    --fundo: #f5f6f8;
+    --superficie: #ffffff;
+    --borda: #e2e5ea;
+    --texto: #1c2430;
+    --texto-fraco: #66717f;
+    --destaque: #1f6f5c;
+    --destaque-claro: #e7f2ee;
+    --erro: #a3242c;
+    --erro-claro: #fbeaeb;
+    --sombra: 0 1px 3px rgba(20, 30, 45, .08), 0 8px 24px rgba(20, 30, 45, .06);
+    --raio: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --fundo: #14181d;
+        --superficie: #1c2127;
+        --borda: #2c333c;
+        --texto: #e8ebef;
+        --texto-fraco: #9aa5b2;
+        --destaque: #4fbf9b;
+        --destaque-claro: #1d2c29;
+        --erro: #ef8a90;
+        --erro-claro: #2c1c1e;
+        --sombra: 0 1px 3px rgba(0, 0, 0, .4);
+    }
+}
+
+* { box-sizing: border-box; }
+
+/* O atributo hidden vale MENOS que qualquer regra de classe com display:
+   `.casca { display: flex }` sobrepunha `hidden` e as duas telas apareciam
+   empilhadas. Esta regra devolve ao hidden a ultima palavra. */
+[hidden] { display: none !important; }
+
+body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--fundo);
+    color: var(--texto);
+    line-height: 1.5;
+}
+
+/* --------------------------------------------------------------------------
+   Entrada (login e cadastro)
+   -------------------------------------------------------------------------- */
+
+.tela-entrada {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 1.5rem;
+}
+
+.cartao-entrada {
+    width: 100%;
+    max-width: 380px;
+    background: var(--superficie);
+    border: 1px solid var(--borda);
+    border-radius: var(--raio);
+    box-shadow: var(--sombra);
+    padding: 2rem;
+}
+
+.marca {
+    margin: 0;
+    font-size: 1.6rem;
+    letter-spacing: -.02em;
+}
+
+.marca .destaque { color: var(--destaque); }
+
+.subtitulo {
+    margin: .25rem 0 1.75rem;
+    color: var(--texto-fraco);
+    font-size: .9rem;
+}
+
+label {
+    display: block;
+    margin-bottom: .35rem;
+    font-size: .82rem;
+    font-weight: 600;
+    color: var(--texto-fraco);
+}
+
+input, select {
+    width: 100%;
+    padding: .6rem .7rem;
+    margin-bottom: 1rem;
+    font: inherit;
+    color: var(--texto);
+    background: var(--fundo);
+    border: 1px solid var(--borda);
+    border-radius: 6px;
+}
+
+input:focus, select:focus {
+    outline: 2px solid var(--destaque);
+    outline-offset: 1px;
+}
+
+.dica {
+    display: block;
+    margin: -.75rem 0 1rem;
+    color: var(--texto-fraco);
+    font-size: .78rem;
+}
+
+/* Marca o campo que o 400 apontou em "campos" — o contrato I-12 existe
+   justamente para o formulario poder fazer isto. */
+input.com-erro {
+    border-color: var(--erro);
+    background: var(--erro-claro);
+}
+
+.botao-principal {
+    width: 100%;
+    padding: .65rem;
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    background: var(--destaque);
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.botao-principal:hover { filter: brightness(1.08); }
+.botao-principal:disabled { opacity: .6; cursor: progress; }
+
+.botao-texto {
+    font: inherit;
+    color: var(--destaque);
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.alternar {
+    margin: 1.25rem 0 0;
+    font-size: .85rem;
+    color: var(--texto-fraco);
+    text-align: center;
+}
+
+.aviso {
+    margin: 0 0 1rem;
+    padding: .55rem .7rem;
+    font-size: .85rem;
+    color: var(--erro);
+    background: var(--erro-claro);
+    border-radius: 6px;
+}
+
+.aviso.sucesso {
+    color: var(--destaque);
+    background: var(--destaque-claro);
+}
+
+/* --------------------------------------------------------------------------
+   Casca autenticada
+   -------------------------------------------------------------------------- */
+
+.casca { min-height: 100vh; display: flex; flex-direction: column; }
+
+.topo {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    padding: .75rem 1.25rem;
+    background: var(--superficie);
+    border-bottom: 1px solid var(--borda);
+}
+
+.marca-pequena { font-weight: 700; letter-spacing: -.01em; }
+
+.seletor-ambiente { display: flex; align-items: center; gap: .5rem; }
+.seletor-ambiente select { margin: 0; width: auto; min-width: 190px; }
+.rotulo-ambiente { margin: 0; }
+
+.acoes-topo {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.saudacao { font-size: .85rem; color: var(--texto-fraco); }
+
+.corpo { flex: 1; display: flex; align-items: flex-start; }
+
+.menu {
+    width: 200px;
+    flex-shrink: 0;
+    padding: 1.25rem 1rem;
+    border-right: 1px solid var(--borda);
+    min-height: calc(100vh - 57px);
+}
+
+.item-menu {
+    display: block;
+    padding: .5rem .65rem;
+    margin-bottom: .2rem;
+    border-radius: 6px;
+    color: var(--texto);
+    text-decoration: none;
+    font-size: .9rem;
+}
+
+.item-menu.ativo { background: var(--destaque-claro); color: var(--destaque); font-weight: 600; }
+.item-menu.desabilitado { color: var(--texto-fraco); opacity: .55; cursor: not-allowed; }
+
+.nota-menu {
+    margin-top: 1.25rem;
+    font-size: .75rem;
+    color: var(--texto-fraco);
+}
+
+.centro {
+    flex: 1;
+    padding: 1.5rem;
+    display: grid;
+    gap: 1.25rem;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    align-content: start;
+}
+
+.painel {
+    background: var(--superficie);
+    border: 1px solid var(--borda);
+    border-radius: var(--raio);
+    box-shadow: var(--sombra);
+    padding: 1.25rem;
+}
+
+.painel h2 { margin: 0 0 .75rem; font-size: 1.05rem; }
+
+.texto-vazio { color: var(--texto-fraco); font-size: .88rem; }
+
+.previa {
+    width: 100%;
+    margin-top: 1rem;
+    border-collapse: collapse;
+    font-size: .85rem;
+}
+
+.previa th, .previa td {
+    padding: .45rem .6rem;
+    border-bottom: 1px solid var(--borda);
+    text-align: right;
+}
+
+.previa th:first-child, .previa td:first-child { text-align: left; }
+.previa thead th { color: var(--texto-fraco); font-weight: 600; }
+
+.celula-vazia { text-align: center !important; color: var(--texto-fraco); font-style: italic; }
+
+.lista-dados {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: .4rem 1rem;
+    margin: 0;
+    font-size: .85rem;
+}
+
+.lista-dados dt { color: var(--texto-fraco); }
+.lista-dados dd { margin: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; }
+
+.rodape-painel {
+    margin: 1rem 0 0;
+    font-size: .78rem;
+    color: var(--texto-fraco);
+}
+
+code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .95em;
+    background: var(--fundo);
+    padding: .1rem .3rem;
+    border-radius: 4px;
+}
+
+@media (max-width: 640px) {
+    .corpo { flex-direction: column; }
+    .menu { width: 100%; min-height: 0; border-right: 0; border-bottom: 1px solid var(--borda); }
+}
+
+/* --------------------------------------------------------------------------
+   Espera pela conferência da sessão guardada
+   --------------------------------------------------------------------------
+   Aparece só entre abrir o app com token guardado e o servidor confirmar que
+   ele ainda vale. Discreto de propósito: é um instante, e piscar um cartão de
+   login aqui sugeriria que a sessão caiu quando ela não caiu. */
+.carregando {
+    padding: 3rem 1rem;
+    text-align: center;
+    color: var(--texto-fraco);
+    font-size: .9rem;
+}
+
+/* ==========================================================================
+   Fatia 6 — T-04, T-05, T-08, T-07
+   ==========================================================================
+   Segue as variáveis já definidas acima. Duas cores novas entram porque a
+   tela precisa distinguir entrada de saída sem depender só do sinal: quem
+   tem daltonismo para vermelho/verde continua lendo o "+" e o "−", e quem
+   não tem lê a cor primeiro. As duas informações existem juntas de propósito. */
+
+:root {
+    --entrada: #1f6f5c;
+    --saida: #a3242c;
+    --previsto: #8a6d1f;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --entrada: #4fbf9b;
+        --saida: #ef8a90;
+        --previsto: #d9b551;
+    }
+}
+
+/* ---------------------------------------------------------------- estrutura */
+
+.cabecalho-painel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.cabecalho-painel h2 { margin: 0; }
+
+.painel-largo { max-width: 100%; }
+
+.alternador,
+.dica-inline {
+    font-size: .8rem;
+    color: var(--texto-fraco);
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+}
+
+/* ------------------------------------------------------------- formulários */
+
+.formulario-linha {
+    display: flex;
+    gap: .5rem;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.formulario-linha.recuado { margin: .5rem 0 .5rem 1.5rem; }
+.formulario-linha input { flex: 1 1 12rem; margin: 0; }
+.formulario-linha select { margin: 0; }
+
+.formulario-bloco {
+    background: var(--destaque-claro);
+    border: 1px solid var(--borda);
+    border-radius: var(--raio);
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.formulario-bloco h3 { margin: 0 0 .75rem; font-size: 1rem; }
+
+.campos-lado-a-lado {
+    display: flex;
+    gap: .75rem;
+    flex-wrap: wrap;
+    margin-bottom: .5rem;
+}
+
+.campos-lado-a-lado label,
+.campo-largo {
+    display: flex;
+    flex-direction: column;
+    gap: .25rem;
+    font-size: .8rem;
+    color: var(--texto-fraco);
+    flex: 1 1 10rem;
+}
+
+.campo-largo { display: block; margin-bottom: .5rem; }
+.campos-lado-a-lado input,
+.campos-lado-a-lado select,
+.campo-largo input { margin: 0; }
+
+.botao-pequeno {
+    width: auto;
+    padding: .45rem .9rem;
+    font-size: .85rem;
+    margin: 0;
+}
+
+/* --------------------------------------------------------- listas de itens */
+
+.lista-categorias,
+.lista-subcategorias,
+.lista-contas {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.lista-categorias > li {
+    border-bottom: 1px solid var(--borda);
+    padding: .3rem 0;
+}
+
+.lista-subcategorias { margin-left: 1.5rem; }
+.lista-subcategorias > li { border-top: 1px dashed var(--borda); }
+
+.lista-contas > li { border-bottom: 1px solid var(--borda); }
+
+/* Arquivado e encerrado continuam legíveis, só recuam visualmente: eles ainda
+   nomeiam o histórico inteiro, então apagá-los da vista seria mentir. */
+.arquivada { opacity: .55; }
+
+.linha-recurso {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    flex-wrap: wrap;
+    padding: .45rem 0;
+}
+
+.linha-recurso.em-edicao { gap: .4rem; }
+.linha-recurso.em-edicao input,
+.linha-recurso.em-edicao select { margin: 0; flex: 0 1 14rem; }
+
+.nome-recurso { font-weight: 600; }
+.cadeado { margin-right: .3rem; cursor: help; }
+
+.acoes-linha {
+    margin-left: auto;
+    display: flex;
+    gap: .5rem;
+    align-items: center;
+}
+
+.acoes-linha .botao-texto { font-size: .8rem; }
+.botao-texto.perigo { color: var(--erro); }
+
+/* -------------------------------------------------------------- etiquetas */
+
+.etiqueta {
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    padding: .12rem .45rem;
+    border-radius: 999px;
+    border: 1px solid var(--borda);
+    white-space: nowrap;
+}
+
+.etiqueta-fraca { color: var(--texto-fraco); cursor: help; }
+.etiqueta-saida   { color: var(--saida); }
+.etiqueta-entrada { color: var(--entrada); }
+.etiqueta-ambos   { color: var(--texto-fraco); }
+.etiqueta-ativo   { color: var(--entrada); }
+.etiqueta-passivo { color: var(--saida); }
+
+/* ------------------------------------------------------------------ contas */
+
+.linha-conta { align-items: baseline; }
+.identidade-conta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+
+.saldos { display: flex; flex-direction: column; align-items: flex-end; margin-left: auto; }
+.saldo-principal { font-variant-numeric: tabular-nums; font-weight: 600; }
+.saldo-previsto {
+    font-size: .75rem;
+    color: var(--previsto);
+    font-variant-numeric: tabular-nums;
+}
+.linha-conta .acoes-linha { margin-left: 1rem; }
+
+/* ------------------------------------------------------------- lançamentos */
+
+.navegador-mes { display: flex; align-items: center; gap: .5rem; }
+.mes-atual { font-weight: 600; min-width: 9rem; text-align: center; }
+.navegador-mes .botao-texto { font-size: 1.1rem; padding: 0 .4rem; }
+
+.filtros {
+    display: flex;
+    gap: .5rem;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.filtros select { margin: 0; flex: 0 1 12rem; }
+.filtros .botao-principal { margin-left: auto; }
+
+.tabela-lancamentos { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.tabela-lancamentos th { text-align: left; color: var(--texto-fraco); font-weight: 500; }
+.tabela-lancamentos th,
+.tabela-lancamentos td { padding: .5rem .4rem; border-bottom: 1px solid var(--borda); }
+.tabela-lancamentos tr.previsto td { background: color-mix(in srgb, var(--previsto) 7%, transparent); }
+.tabela-lancamentos .etiqueta { margin-left: .4rem; }
+
+.numerico { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.entrada { color: var(--entrada); }
+.saida { color: var(--saida); }
+.texto-fraco { color: var(--texto-fraco); }
+
+.resumo-mes {
+    display: flex;
+    gap: 1.25rem;
+    justify-content: flex-end;
+    padding: .75rem .4rem 0;
+    font-size: .875rem;
+    font-variant-numeric: tabular-nums;
+    flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------ mapa (T-07) */
+
+.bloco-mapa { margin-bottom: 1.75rem; }
+.bloco-mapa h3 { margin: 0 0 .5rem; font-size: .95rem; color: var(--texto-fraco); }
+
+/* A tabela tem catorze colunas e não cabe em tela estreita. Ela rola dentro
+   da própria caixa; deixar o body rolar na horizontal quebraria o resto. */
+.rolagem-horizontal { overflow-x: auto; }
+
+.tabela-mapa {
+    border-collapse: collapse;
+    font-size: .8rem;
+    min-width: 46rem;
+    width: 100%;
+}
+
+.tabela-mapa th,
+.tabela-mapa td { padding: .35rem .5rem; border-bottom: 1px solid var(--borda); }
+.tabela-mapa thead th { color: var(--texto-fraco); font-weight: 500; }
+
+.coluna-rotulo {
+    text-align: left;
+    font-weight: 500;
+    position: sticky;
+    left: 0;
+    background: var(--superficie);
+    white-space: nowrap;
+}
+
+.tabela-mapa .total { font-weight: 600; border-left: 1px solid var(--borda); }
+.linha-total > * { border-top: 2px solid var(--borda); font-weight: 600; }
+.linha-subcategoria { font-size: .75rem; }
+.linha-subcategoria .coluna-rotulo { font-weight: 400; color: var(--texto-fraco); }
+.recuo-sub { padding-left: 1.4rem; }
+.sem-expansor { padding-left: 1.1rem; }
+
+.expansor { padding: 0; font-size: inherit; font-weight: inherit; }
+.seta { display: inline-block; width: .8rem; color: var(--texto-fraco); }
+
+/* Célula com os dois números: o previsto vai embaixo, menor e noutra cor.
+   Nunca somado ao realizado — é o B-D10 desenhado. */
+.tabela-mapa td.numerico { line-height: 1.25; }
+.valor-previsto { display: block; font-size: .68rem; color: var(--previsto); }
+.tabela-mapa td.vazia { color: var(--borda); }

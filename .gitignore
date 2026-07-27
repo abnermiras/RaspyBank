@@ -45,6 +45,13 @@ dependency-reduced-pom.xml
 # -----------------------------------------------------------------------------
 # Node / frontend
 # -----------------------------------------------------------------------------
+# A pasta static/ do Spring passou a ser DESTINO do build do Vite (27/07/2026),
+# não mais fonte: o protótipo escrito à mão que morava ali foi removido junto
+# com a fatia 6. Versionar a saída do build traria duas cópias do mesmo código,
+# e a segunda envelheceria em silêncio até alguém depurar a versão errada.
+# Quem constrói a imagem é o Dockerfile, que roda o build sozinho.
+raspybank-app/src/main/resources/static/
+
 node_modules/
 dist/
 dist-ssr/

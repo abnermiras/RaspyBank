@@ -22,11 +22,18 @@ COMPOSE_PI    = docker compose --env-file .env -f infra/compose.yaml -f infra/co
 -include .env
 
 .DEFAULT_GOAL := help
-.PHONY: help up down restart logs ps psql psql-app db-reset db-dump tools tools-down check-env build test arch app gate diag
+.PHONY: help up down restart logs ps psql psql-app db-reset db-dump tools tools-down check-env build test arch app gate diag web web-build web-deps web-audit
+
+# Data de corte das dependências do frontend. REGRA: nada publicado há menos de
+# uma semana entra no projeto. O padrão de ataque de cadeia de suprimentos no
+# npm é uma versão maliciosa que vive poucas horas até ser retirada; uma trava
+# de idade derruba quase a classe inteira sem depender de reconhecer o pacote.
+# Ao mexer nas dependências, mova esta data — nunca a remova.
+NPM_CORTE = 2026-07-17
 
 # -----------------------------------------------------------------------------
 help:  ## Lista os alvos disponíveis
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 check-env:
@@ -116,7 +123,11 @@ app: check-env  ## Sobe o backend na VM, com recarga rápida
 # aqui (foi exatamente assim que JWT_SEGREDO ficou de fora e o gate quebrou).
 # O único -e explícito é DB_HOST, que dentro da rede do Compose é o nome do
 # serviço, não localhost — e -e vence o --env-file em caso de conflito.
-gate: check-env  ## Constrói a imagem real e sobe. Se passar aqui, passa no Pi.
+#
+# Depende de "build" porque a imagem NÃO roda os testes de integração — dentro
+# de um `docker build` não há daemon do Docker para o Testcontainers usar. O
+# gate só é honesto se a suíte inteira passar antes, aqui fora.
+gate: check-env build  ## Constrói a imagem real e sobe. Se passar aqui, passa no Pi.
 	docker build -t raspybank:local .
 	docker run --rm -it \
 		--network raspybank_raspybank \
@@ -127,3 +138,29 @@ gate: check-env  ## Constrói a imagem real e sobe. Se passar aqui, passa no Pi.
 
 diag:  ## Consulta o endpoint de diagnóstico
 	@curl -s http://localhost:8080/api/diagnostico | python3 -m json.tool
+
+# -----------------------------------------------------------------------------
+# Frontend
+# -----------------------------------------------------------------------------
+# Nenhum alvo aqui usa "npm install" solto, e isso é deliberado:
+#   - "npm ci" obedece ao package-lock.json e recusa qualquer versão fora dele,
+#     conferindo o hash de integridade de cada pacote. "npm install" pode
+#     resolver versão nova sem avisar.
+#   - "--ignore-scripts" bloqueia os hooks preinstall/install/postinstall, que
+#     são o vetor de propagação do worm Shai-Hulud. Custo verificado em
+#     27/07/2026: zero — nenhum dos 54 pacotes da árvore pede script.
+# O build do frontend NÃO está no "mvn install" de propósito: o plugin que faria
+# isso baixa um binário do Node da internet a cada build, criando exatamente a
+# raiz de confiança nova que a regra do NPM_CORTE existe para evitar.
+
+web: ## Sobe o frontend em modo desenvolvimento (proxy para o backend em :8080)
+	cd raspybank-web && npm run dev
+
+web-build: ## Gera o build de produção do frontend
+	cd raspybank-web && npm run build
+
+web-deps: ## Instala as dependências do frontend a partir do lock, sem rodar scripts
+	cd raspybank-web && npm ci --ignore-scripts
+
+web-audit: ## Mostra as falhas conhecidas nas dependências do frontend
+	@cd raspybank-web && npm audit || true

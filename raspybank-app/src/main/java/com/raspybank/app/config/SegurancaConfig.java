@@ -61,18 +61,40 @@ public class SegurancaConfig {
                     "/swagger-ui/**",
                     "/swagger-ui.html").permitAll()
 
-                // As telas. A lista e explicita, arquivo por arquivo, em vez
-                // de um curinga como "/**.js": o curinga liberaria tambem o
-                // que ainda nao existe, e endpoint novo deve nascer protegido.
-                // Sao arquivos publicos por natureza — a tela de login precisa
-                // carregar ANTES de haver token. Nenhum dado sai daqui; o que
-                // eles fazem e chamar a API, essa sim autenticada.
+                // As telas. Sao publicas por natureza — a tela de login
+                // precisa carregar ANTES de haver token. Nenhum dado sai
+                // daqui; o que elas fazem e chamar a API, essa sim autenticada.
+                //
+                // As rotas internas da SPA aparecem aqui porque recarregar a
+                // pagina em /contas manda o caminho ao servidor; quem devolve
+                // o index.html nesses casos e o SpaControlador. A lista e a
+                // mesma dele, e as duas precisam andar juntas.
                 .requestMatchers(
                     "/",
                     "/index.html",
-                    "/estilo.css",
-                    "/app.js",
-                    "/favicon.ico").permitAll()
+                    "/favicon.ico",
+                    "/entrar",
+                    "/mapa",
+                    "/lancamentos",
+                    "/categorias",
+                    "/contas").permitAll()
+
+                // ATENCAO — unico curinga do arquivo, e ele e deliberado.
+                //
+                // A regra original desta classe era listar arquivo por
+                // arquivo, sem curinga, porque "/**.js" liberaria tambem o que
+                // ainda nao existe. A regra continua valendo; o que mudou foi
+                // o alvo. O Vite gera nomes com hash de conteudo
+                // (index-DkTzU8dD.css) que MUDAM a cada build, entao lista
+                // explicita e impossivel de manter: ela ficaria errada no
+                // primeiro build seguinte, e o sintoma seria a tela em branco.
+                //
+                // O motivo de isto ser seguro e que /assets/ nao e um espaco
+                // aberto: nenhum controlador mora la. Todo endpoint deste
+                // sistema nasce sob /api/, e um controlador novo continua
+                // nascendo protegido, exatamente como a regra queria. O que
+                // /assets/ contem e apenas a saida do build do frontend.
+                .requestMatchers("/assets/**").permitAll()
                 // Tudo o mais exige autenticacao. Endpoint novo nasce
                 // protegido por padrao — o inverso seria pedir para esquecer.
                 .anyRequest().authenticated())
