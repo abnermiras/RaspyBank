@@ -51,12 +51,22 @@ public class MapaDeGastosServico {
 
     private final LancamentoRepositorio lancamentos;
 
-    public MapaDeGastosServico(LancamentoRepositorio lancamentos) {
+    private final SituacaoVencidaServico vencidos;
+
+    public MapaDeGastosServico(LancamentoRepositorio lancamentos,
+                               SituacaoVencidaServico vencidos) {
+        this.vencidos = vencidos;
         this.lancamentos = lancamentos;
     }
 
     @Transactional(readOnly = true)
     public Mapa montar(UUID ambienteId, int ano) {
+
+        // B-D10 separa realizado de previsto em cada celula. Sem a virada, um
+        // gasto de agosto que ja aconteceu apareceria na linha de previsto — e
+        // as duas colunas do quadro central diriam a coisa errada.
+        vencidos.realizarVencidos(ambienteId, java.time.LocalDate.now());
+
 
         List<LinhaDoMapa> linhas = lancamentos.mapaDoAno(ambienteId, ano);
 

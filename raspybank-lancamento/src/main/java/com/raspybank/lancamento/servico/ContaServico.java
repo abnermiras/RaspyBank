@@ -62,6 +62,7 @@ public class ContaServico {
     private final CategoriaRepositorio categorias;
     private final LancamentoRepositorio lancamentos;
     private final ContaFormaPagamentoRepositorio formasDePagamento;
+    private final SituacaoVencidaServico vencidos;
 
     @PersistenceContext
     private EntityManager em;
@@ -70,12 +71,14 @@ public class ContaServico {
                         ContaAmbienteRepositorio vinculos,
                         CategoriaRepositorio categorias,
                         LancamentoRepositorio lancamentos,
-                        ContaFormaPagamentoRepositorio formasDePagamento) {
+                        ContaFormaPagamentoRepositorio formasDePagamento,
+                        SituacaoVencidaServico vencidos) {
         this.contas = contas;
         this.vinculos = vinculos;
         this.categorias = categorias;
         this.lancamentos = lancamentos;
         this.formasDePagamento = formasDePagamento;
+        this.vencidos = vencidos;
     }
 
     // =========================================================================
@@ -90,6 +93,11 @@ public class ContaServico {
      */
     @Transactional(readOnly = true)
     public List<Resumo> listar(UUID ambienteId, boolean incluirEncerradas) {
+
+        // O saldo REALIZADO e uma soma filtrada por situacao: sem a virada, o
+        // boleto vencido ontem ficaria de fora do numero que a pessoa confere
+        // contra o extrato do banco.
+        vencidos.realizarVencidos(ambienteId, LocalDate.now());
 
         List<Conta> lista = incluirEncerradas
             ? contas.doAmbiente(ambienteId)
@@ -139,6 +147,7 @@ public class ContaServico {
      */
     @Transactional(readOnly = true)
     public Resumo resumo(UUID ambienteId, UUID contaId) {
+        vencidos.realizarVencidos(ambienteId, LocalDate.now());
         Conta c = exigir(ambienteId, contaId);
 
         SaldoDaConta saldo = lancamentos.saldos(List.of(contaId)).stream()
@@ -154,6 +163,7 @@ public class ContaServico {
 
     @Transactional(readOnly = true)
     public SaldoDaConta saldo(UUID ambienteId, UUID contaId) {
+        vencidos.realizarVencidos(ambienteId, LocalDate.now());
         exigir(ambienteId, contaId);
         return lancamentos.saldos(List.of(contaId)).stream()
             .findFirst()

@@ -390,6 +390,167 @@ Regras de construção:
 
 ---
 
+## 6b. Cartões e faturas — DESENHO, ainda não implementado
+
+> **Nada desta seção existe em código.** Foi escrita na varredura que precede a V12, para ser lida e corrigida antes de qualquer migração — o mesmo procedimento que precedeu a V10 e a V11, e que nas duas vezes evitou corretiva. Decisões em `decisoes.md` §4f (B-D45 a B-D56).
+
+### As três camadas
+
+```
+conta "Nubank"  (ATIVO, não-física)        ← já existe hoje
+  └── cartão "Black"   limite 10.000 · vence dia 15 · fecha 5 dias antes
+        ├── emitido  Abner    físico   ****1234
+        ├── emitido  Luciana  físico   ****5678
+        └── emitido  —        virtual  ****9012
+                 os três consomem os mesmos 10.000
+```
+
+O **cartão é o contrato**, e é ele quem tem limite, vencimento e fatura (F18). O **emitido** é cada plástico ou virtual. A **fatura é do contrato** e engloba todos os emitidos dele.
+
+O cartão **também é uma conta** `PASSIVO` (B-D47): a dívida é soma de lançamentos, nunca coluna (P1), e por isso ele aparece na listagem de contas junto das outras — e o patrimônio já o subtrai sozinho.
+
+### `POST /api/cartoes`
+```json
+{
+  "contaBancoId": "0198...", "nome": "Black",
+  "limite": "10000.00", "diaVencimento": 15, "diasParaFechamento": 5
+}
+```
+
+`contaBancoId` é obrigatório e **não pode ser uma conta física** — carteira, gaveta e cofre não emitem cartão de crédito. A regra reusa B-D41: conta cuja lista de formas é só `DINHEIRO` é física. **403** se for.
+
+`diasParaFechamento` é opcional, padrão **5**. Fica por cartão e não fixo no sistema porque cada banco tem sua regra, e um número fixo transformaria a regra do banco em trabalho manual todo mês (B-D49).
+
+### `GET /api/cartoes/{id}`
+```json
+{
+  "id": "0198...", "nome": "Black", "banco": { "id": "0198...", "nome": "Nubank" },
+  "limite": "10000.00", "limiteConsumido": "3420.00", "limiteDisponivel": "6580.00",
+  "diaVencimento": 15, "diasParaFechamento": 5,
+  "emitidos": [
+    { "id": "...", "nomeTitular": "Abner", "usuarioId": "0198...",
+      "tipo": "FISICO", "finalDoCartao": "1234", "limiteProprio": null }
+  ],
+  "faturaAberta": { "id": "...", "mesReferencia": "2026-08", "total": "1240.00" }
+}
+```
+
+**O limite não trava nada** (B-D48). Nenhuma compra é recusada por estourá-lo; os três números existem para você conferir contra o app do banco.
+
+`limiteConsumido` inclui **parcelas futuras**. Elas já existem como lançamentos desde a compra (F23), com data futura — então entram pelo `saldoComPrevistos` e não pelo `saldo` (B-D26). Comprar 10x de R$ 100 derruba o disponível em R$ 1.000 na hora, como no app do banco.
+
+### `POST /api/cartoes/{id}/emitidos`
+```json
+{ "nomeTitular": "Luciana", "tipo": "FISICO", "finalDoCartao": "5678", "limiteProprio": null }
+```
+
+`nomeTitular` é **texto livre** e `usuarioId` fica nulo (B-D53): convidar usuário é o I-08, que não existe ainda. Você registra o adicional hoje e vê os gastos dela separados; quando o convite chegar, preenche-se o vínculo e nada mais muda.
+
+`limiteProprio` nulo significa "usa o limite do contrato" — o caso comum.
+
+### `GET /api/cartoes/{id}/faturas?ano=2026`
+
+A fatura **não tem coluna de status** (F19), e o estado é sempre calculado. Mas ele **não é um enum de cinco valores** — são três perguntas independentes, e juntá-las num campo só seria o mesmo erro que B-D15 já custou uma vez ("sistêmica" e "entra no mapa" eram duas perguntas fingindo ser uma):
+
+```json
+{
+  "id": "...", "mesReferencia": "2026-08",
+  "vencimento": "2026-09-15", "fechamentoPrevisto": "2026-09-10",
+  "total": "5000.00", "pago": "1000.00", "aPagar": "4000.00",
+  "ciclo": "ABERTA",          // ABERTA | FECHADA — deriva de fechada_em
+  "quitacao": "PARCIAL",      // NADA_PAGO | PARCIAL | QUITADA — deriva das somas
+  "vencida": false            // fechada, não quitada, vencimento no passado
+}
+```
+
+Por que separado: **uma fatura ABERTA pode estar PARCIALMENTE paga**. É o caso da antecipação, e num enum único ele não teria nome — ou ganharia um `ABERTA_COM_ANTECIPACAO` que existe só para tapar o buraco do desenho. A tela compõe o rótulo a partir dos três; o servidor não escolhe por ela.
+
+> **O I-07 fecha aqui** (B-D52). Ele estava aberto desde o modelo lógico porque faltava confirmar se pagamento parcial existia. Existe, e antes do fechamento também.
+
+Faturas são **pré-geradas 12 meses à frente** (F20), para o parcelamento ter onde cair.
+
+### `POST /api/faturas/{id}/fechar` · `POST /api/faturas/{id}/reabrir`
+
+O fechamento automático é `vencimento − diasParaFechamento`, recuando para a **sexta anterior** se cair em fim de semana. O botão manual existe porque cada banco tem sua regra.
+
+`reabrir` **revoga F21**, que dizia que fatura fechada é imutável (B-D50). O motivo é o dele: fechar sem querer não pode ser irreversível.
+
+Com a fatura fechada, **lançamento novo vai para a seguinte** — mesmo que a data da compra seja anterior ao fechamento.
+
+### `POST /api/faturas/{id}/pagamentos`
+```json
+{ "contaOrigemId": "0198...", "valor": "2500.00",
+  "dataCaixa": "2026-08-15", "formaPagamento": "BOLETO" }
+```
+
+Cria um **par de lançamentos ligados**, exatamente como a transferência (B-D38), com duas coisas a mais: os dois apontam para a `fatura`, e a perna de saída carrega a **forma de pagamento**, validada contra a lista da conta pagadora (V11).
+
+Quatro liberdades deliberadas, todas pedidas explicitamente:
+
+- **`valor` pode ser parcial** — pagar 2.500 de uma fatura de 5.000 é legítimo;
+- **a fatura pode estar ABERTA** — antecipar é o mecanismo de liberar limite, ver abaixo;
+- **`contaOrigemId` é livre**, inclusive de outro banco: pagar a fatura do Nubank com a conta do C6, via boleto;
+- **a forma é escolhida**, porque débito e boleto são caminhos diferentes para o mesmo pagamento.
+
+#### Antecipar pagamento é como se libera limite
+
+Não é conveniência, é o mecanismo. O caso dele, inteiro:
+
+```
+limite 10.000 · fatura aberta com 5.000 · disponível 1.000
+                                   ↓
+   quer comprar 2.000, e só tem 1.000 de limite
+                                   ↓
+   paga 1.000 da fatura ABERTA  →  pendente 4.000 · disponível 2.000
+                                   ↓
+                        a compra de 2.000 passa
+```
+
+Sem antecipação, o limite só voltaria no vencimento. É por isso que a fatura aberta aceita pagamento.
+
+O sistema **continua não travando nada** (B-D48): ele deixa lançar e deixa o disponível ficar negativo. O banco de verdade não deixaria, e é justamente por isso que o número precisa ser verdadeiro — ele existe para você ver que estourou, não para impedir.
+
+**O pagamento aparece no extrato da conta pagadora** — o dinheiro saiu de lá, e omitir seria mentir sobre o saldo. **Não aparece no mapa de gastos**: os gastos já entraram um a um quando as compras foram lançadas, e contá-los de novo dobraria o mês.
+
+Categoria: a sistêmica `PAGAMENTO_FATURA`, que B-D13 reservou para este momento. Como transferência, ela nasce com `entraNoMapa = false` — pagar a fatura não é um gasto novo, os gastos já entraram um a um quando as compras foram lançadas. Contá-los de novo dobraria o mês.
+
+### Compra parcelada
+
+`POST /api/lancamentos` numa conta que é cartão ganha dois campos opcionais:
+
+```json
+{ "contaId": "<o cartão>", "categoriaId": "...", "valor": "1000.00",
+  "dataCompetencia": "2026-08-10", "parcelas": 10 }
+```
+
+Gera **10 lançamentos**, um por fatura (F23), com o resíduo dos centavos na primeira. Todos compartilham a mesma `dataCompetencia` — a data da compra — e diferem pela fatura, que é o que ele descreveu: *"a data da compra repete, muda somente a fatura"*.
+
+**Não existe tabela `parcela`** (B-D55). Cada parcela é um lançamento com `grupoParcelamentoId`, `parcelaNumero` e `parcelaTotal`. Uma tabela só guardaria agregado — o total é a soma, a data é a competência repetida, a quantidade é a contagem — e agregado guardado contraria P1.
+
+### Editar um lançamento de cartão
+
+Dois campos a mais no `PUT`, e os dois foram pedidos:
+
+- **`faturaId`** — mover a compra de mês. **403** se a fatura de destino estiver fechada; reabra antes (B-D50), senão "fechada" não significa nada.
+- **`dataCompetencia`** — a data da compra muda independentemente da fatura.
+
+### O mapa de gastos, com cartão
+
+O gasto de cartão entra no mapa no **mês da fatura** (B-D54), não no mês da compra. É o regime de caixa que o mapa inteiro já usa (P-T2), e F14 já previa que no cartão a `data_caixa` é mantida pela fatura. Compra de 10x em agosto vira R$ 100 em cada um dos dez meses seguintes — que é quando o dinheiro realmente sai.
+
+`GET /api/relatorios/mapa-de-gastos?ano=2026&contas=CARTAO` ganha um filtro: `TODAS` (padrão), `CARTAO`, `SEM_CARTAO`. Ele responde "quanto do meu mercado foi no cartão" **sem tocar na célula** — B-D10 separou dois números com esforço, e um terceiro em doze colunas viraria sopa.
+
+### Códigos de erro desta seção
+
+| Código | Quando |
+|---|---|
+| `400` | `limite` malformado, `diaVencimento` fora de 1–31, `parcelas` menor que 1 |
+| `403` | `contaBancoId` é conta física (B-D41); mover lançamento para fatura fechada |
+| `404` | Cartão, emitido ou fatura inexistente, ou de outro ambiente seu (B-D21) |
+| `409` | Fechar fatura já fechada; reabrir fatura não fechada |
+
+---
+
 ## 7. Fora deste contrato
 
-Cartão, cartão emitido, fatura, parcela e recorrência são **V12**, junto da tela T-06 (B-D1). Quando chegarem, `POST /api/lancamentos` ganha os campos de parcelamento e este documento ganha uma seção — não o contrário.
+**Recorrência** (F24/F25) ficou fora da V12 por B-D56: não é feature de cartão, e entra depois valendo para conta e cartão ao mesmo tempo. Cartão, emitido e fatura têm o desenho fechado em §6b, ainda sem código.

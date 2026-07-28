@@ -69,19 +69,22 @@ public class LancamentoServico {
     private final ContaRepositorio contas;
     private final ContaAmbienteRepositorio vinculos;
     private final ContaFormaPagamentoRepositorio formasDePagamento;
+    private final SituacaoVencidaServico vencidos;
 
     public LancamentoServico(LancamentoRepositorio lancamentos,
                              CategoriaRepositorio categorias,
                              SubcategoriaRepositorio subcategorias,
                              ContaRepositorio contas,
                              ContaAmbienteRepositorio vinculos,
-                             ContaFormaPagamentoRepositorio formasDePagamento) {
+                             ContaFormaPagamentoRepositorio formasDePagamento,
+                             SituacaoVencidaServico vencidos) {
         this.lancamentos = lancamentos;
         this.categorias = categorias;
         this.subcategorias = subcategorias;
         this.contas = contas;
         this.vinculos = vinculos;
         this.formasDePagamento = formasDePagamento;
+        this.vencidos = vencidos;
     }
 
     // =========================================================================
@@ -104,6 +107,11 @@ public class LancamentoServico {
     @Transactional(readOnly = true)
     public List<Item> listar(UUID ambienteId, YearMonth mes, UUID contaId,
                              UUID categoriaId, SituacaoLancamento situacao) {
+
+        // Antes de ler: o previsto que venceu vira realizado. Sem isto, o
+        // boleto de 05/08 continuaria PREVISTO em 06/08 e o extrato mostraria
+        // uma etiqueta que o calendario ja desmentiu.
+        vencidos.realizarVencidos(ambienteId, LocalDate.now());
 
         List<Lancamento> encontrados = lancamentos.buscar(
             ambienteId, mes.atDay(1), mes.atEndOfMonth(), contaId, categoriaId, situacao);

@@ -66,11 +66,17 @@ class MapaDeGastosApiTest extends IntegracaoTest {
         assertEquals("0.00", janeiro.get("previsto"),
             "Zero explicito, nunca ausente — a tela nao deveria adivinhar buraco");
 
-        // Fevereiro tem previsto: e o que prova que os dois numeros vivem
-        // separados ate a tela.
         var fevereiro = celula(mercado, 2);
         assertEquals("200.00", fevereiro.get("realizado"));
-        assertEquals("300.00", fevereiro.get("previsto"));
+        assertEquals("0.00", fevereiro.get("previsto"));
+
+        // Dezembro tem previsto: e o que prova que os dois numeros vivem
+        // separados ate a tela. A data esta no FUTURO de proposito — desde a
+        // virada automatica de vencidos, previsto com data passada e um estado
+        // que nao sobrevive a primeira leitura.
+        var dezembro = celula(mercado, 12);
+        assertEquals("0.00", dezembro.get("realizado"));
+        assertEquals("300.00", dezembro.get("previsto"));
     }
 
     @Test
@@ -141,13 +147,20 @@ class MapaDeGastosApiTest extends IntegracaoTest {
     @Test
     @DisplayName("O saldo fica negativo quando se gasta mais do que entra")
     void saldoNegativo() {
-        // Fevereiro: nenhuma entrada, 200 de saida realizada.
-        var saldoFevereiro = ((List<Map<String, Object>>)
-            ((Map<String, Object>) mapa(ANO).get("saldo")).get("porMes")).get(1);
+        var porMes = (List<Map<String, Object>>)
+            ((Map<String, Object>) mapa(ANO).get("saldo")).get("porMes");
 
+        // Fevereiro: nenhuma entrada, 200 de saida realizada.
+        var saldoFevereiro = porMes.get(1);
         assertEquals("-200.00", saldoFevereiro.get("realizado"),
             "E o unico lugar do mapa onde numero negativo aparece");
-        assertEquals("-300.00", saldoFevereiro.get("previsto"));
+        assertEquals("0.00", saldoFevereiro.get("previsto"));
+
+        // Dezembro: o previsto do cenario, que mora no futuro desde a virada
+        // automatica de vencidos.
+        var saldoDezembro = porMes.get(11);
+        assertEquals("0.00", saldoDezembro.get("realizado"));
+        assertEquals("-300.00", saldoDezembro.get("previsto"));
     }
 
     @Test
@@ -242,11 +255,23 @@ class MapaDeGastosApiTest extends IntegracaoTest {
         // Janeiro: 5.000 de entrada.
         lancar(salarioId, null, "5000.00", "2026-01-05", null);
 
-        // Fevereiro: 200 realizados e 300 marcados como previstos. A data e
-        // passada, entao a situacao vem por correcao explicita — e o teste de
-        // "dois numeros" fica independente do dia em que a suite roda.
+        // Fevereiro: 200 realizados.
         lancar(mercadoId, null, "200.00", "2026-02-08", null);
-        lancar(mercadoId, null, "300.00", "2026-02-20", "PREVISTO");
+
+        // O previsto do cenario vive em DEZEMBRO, e nao em fevereiro com
+        // correcao explicita como antes.
+        //
+        // A versao anterior lancava 300 em 20/02 e forcava PREVISTO pelo PUT,
+        // para o teste nao depender do dia em que a suite roda. Isso deixou de
+        // ser possivel: a virada automatica de vencidos (28/07/2026) faz um
+        // PREVISTO com data passada virar REALIZADO na primeira leitura — e e
+        // exatamente o comportamento desejado. Previsto com data no passado
+        // passou a ser um estado que nao existe.
+        //
+        // LIMITE CONHECIDO: como ANO e fixo em 2026, isto vale ate dezembro de
+        // 2026. O teste inteiro ja era preso ao ano; quando alguem o soltar,
+        // solta isto junto.
+        lancar(mercadoId, null, "300.00", "2026-12-20", null);
 
         // Transferencia de 1.000: entra_no_mapa = false, nao deve aparecer.
         //

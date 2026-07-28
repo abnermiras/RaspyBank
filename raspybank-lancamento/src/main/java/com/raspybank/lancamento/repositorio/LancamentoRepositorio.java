@@ -7,6 +7,7 @@ import com.raspybank.lancamento.dominio.SaldoDaConta;
 import com.raspybank.lancamento.dominio.SituacaoLancamento;
 import com.raspybank.lancamento.dominio.TipoLancamento;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -191,4 +192,36 @@ public interface LancamentoRepositorio extends JpaRepository<Lancamento, UUID> {
      * integridade falhou", que a tela nao tem como transformar em instrucao.</p>
      */
     long countByContaIdAndFormaPagamento(UUID contaId, FormaPagamento formaPagamento);
+
+    /**
+     * Vira para {@code REALIZADO} os previstos cuja data de caixa ja passou.
+     *
+     * <p>Um UPDATE em lote, e nao um laco de leitura e gravacao: a virada roda
+     * no caminho de LEITURA do extrato, dos saldos e do mapa, e um laco faria
+     * cada abertura de tela custar uma consulta por lancamento vencido.</p>
+     *
+     * <p>De mao unica de proposito — so {@code PREVISTO} para {@code REALIZADO},
+     * nunca o contrario. Ver {@link com.raspybank.lancamento.servico.SituacaoVencidaServico}
+     * para a briga que isso evita com {@code corrigirSituacao}.</p>
+     *
+     * <p>O filtro por {@code ambienteId} nao esta aqui por seguranca — a RLS ja
+     * fez essa parte. Esta pelo motivo de B-D21: sem ele, abrir o extrato da
+     * casa viraria tambem os previstos do freelance, e a auditoria registraria
+     * uma alteracao em massa que a pessoa nao pediu.</p>
+     *
+     * <p>{@code clearAutomatically} porque um UPDATE em lote nao passa pelo
+     * contexto de persistencia: sem ele, uma entidade ja carregada continuaria
+     * dizendo {@code PREVISTO} na mesma transacao, e a tela mostraria o valor
+     * velho logo depois de o banco ter mudado.</p>
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+        UPDATE Lancamento l
+           SET l.situacao = com.raspybank.lancamento.dominio.SituacaoLancamento.REALIZADO
+         WHERE l.ambienteId = :ambienteId
+           AND l.situacao   = com.raspybank.lancamento.dominio.SituacaoLancamento.PREVISTO
+           AND l.dataCaixa <= :hoje
+        """)
+    int realizarPrevistosVencidos(@Param("ambienteId") UUID ambienteId,
+                                  @Param("hoje") LocalDate hoje);
 }

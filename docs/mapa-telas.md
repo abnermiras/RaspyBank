@@ -329,3 +329,19 @@ As outras duas sistêmicas continuam lançáveis, e isso importa: "Ajuste de sal
 Um efeito colateral bom no `MapaDeGastosApiTest`: ele criava a transferência do cenário com um `POST` de lançamento na categoria sistêmica, o que passou a ser recusado. Reescrito para usar o endpoint de transferência, o cenário ficou mais honesto — agora existem **duas** pernas, e o mapa precisa ignorar as duas.
 
 **Verificado em 28/07/2026:** 177 testes verdes (eram 173).
+
+### Previsto vencido vira realizado (28/07/2026)
+
+Achado numa varredura de pendências, não por defeito relatado — e teria mordido em dias.
+
+`SituacaoLancamento.derivarDe` (B-D9) só rodava em dois momentos: quando o lançamento nascia e quando alguém o editava. Nada reavaliava com o passar do tempo. Na prática: a conta de luz lançada para 05/08 nascia `PREVISTO` corretamente e, em 06/08, **continuava** `PREVISTO`. O saldo realizado ignorava aquele valor para sempre, e o número que a pessoa confere contra o extrato do banco ficava errado sem nada denunciar.
+
+Decisões em `decisoes.md` §4e (B-D43 e B-D44).
+
+**A virada acontece na leitura, não num job agendado.** O job seria o desenho óbvio — `Canal.SISTEMA` já existe e o javadoc dele fala em "jobs agendados". O impedimento é a RLS: rotina de fundo não tem `raspybank.usuario_id` na sessão, nenhuma política consegue avaliá-la, e o UPDATE alcançaria zero linhas. Fazê-la funcionar exigiria uma função `SECURITY DEFINER` nova — decisão que passa pelo critério B-D19 e pelo inventário de `security-definer.md`, e que merece discussão própria. Dentro da requisição a identidade já está estabelecida e nada disso é necessário.
+
+**A virada é de mão única**, e é isso que evita uma briga infinita com `corrigirSituacao` (B-D22): se ela também desfizesse correções manuais, a pessoa marcaria de volta como previsto e a próxima leitura viraria de novo. Quando o boleto não foi pago, a correção certa é **mudar a data** — "não paguei dia 05, pago dia 12" vira reagendar, e ele volta a previsto pela regra normal de B-D9.
+
+**Um teste caiu, e o motivo é uma consequência que vale registrar:** o `MapaDeGastosApiTest` criava um `PREVISTO` com data **passada**, forçado por `PUT`, justamente para não depender do dia em que a suíte roda. Isso deixou de ser possível — previsto com data no passado é um estado que não sobrevive à primeira leitura. O cenário passou a usar dezembro.
+
+**Verificado em 28/07/2026:** 181 testes verdes (eram 177), sendo 4 novos em `SituacaoVencidaTest` — incluindo o que documenta o caminho do "não paguei, reagendo".
