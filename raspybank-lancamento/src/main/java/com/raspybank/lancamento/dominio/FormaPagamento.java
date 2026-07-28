@@ -1,5 +1,6 @@
 package com.raspybank.lancamento.dominio;
 
+import java.util.Collection;
 import java.util.Set;
 
 /**
@@ -90,5 +91,30 @@ public enum FormaPagamento {
      */
     public boolean aceita(TipoLancamento tipo) {
         return sentidos.contains(tipo);
+    }
+
+    /**
+     * Uma conta guarda papel moeda OU dinheiro virtual, nunca os dois.
+     *
+     * <p>{@code DINHEIRO} e papel moeda, e o unico lugar que guarda papel moeda
+     * e um lugar fisico: carteira, bolso, gaveta, cofre. Nenhum deles aceita
+     * pix. Do outro lado, o dinheiro de uma conta no Banco do Brasil e virtual —
+     * tirar dinheiro de la nao e "pagar em especie", e um <b>saque</b>, que
+     * neste sistema e uma transferencia para a conta fisica (B-D39).</p>
+     *
+     * <p>Por isso {@code DINHEIRO} e mutuamente exclusivo com todo o resto: uma
+     * lista com {@code DINHEIRO} e {@code PIX} descreveria uma conta que nao
+     * existe, e o seletor da T-08 ofereceria pix para pagar da carteira.</p>
+     *
+     * <p><b>Esta regra vive no servico e na tela, nao no banco</b>, e a diferenca
+     * e deliberada. As outras duas regras de forma — a forma esta na lista da
+     * conta, a forma aceita o sentido — sao chaves compostas porque viola-las
+     * grava um LANCAMENTO errado. Esta so torna a lista da conta incoerente:
+     * nenhum numero fica errado, so uma opcao sem sentido aparece num seletor.
+     * Impor no banco custaria um gatilho de nivel de comando, e gatilho e a
+     * ferramenta mais cara de manter do arquivo.</p>
+     */
+    public static boolean listaEhCoerente(Collection<FormaPagamento> formas) {
+        return !formas.contains(DINHEIRO) || formas.size() == 1;
     }
 }

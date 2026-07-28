@@ -272,10 +272,26 @@ function LinhaDeConta({ conta, ocupado, formasConhecidas, aoEditar, aoEditarForm
  * duas cópias divergiriam na primeira correção feita só num deles.
  */
 function SeletorDeFormas({ formasConhecidas, formas, padraoSaida, padraoEntrada, aoMudar, desabilitado }) {
+  // Papel moeda OU dinheiro virtual, nunca os dois — e por isso as caixas se
+  // desligam entre si em vez de só recusarem a combinação depois.
+  //
+  // DINHEIRO é papel moeda, e o único lugar que guarda papel moeda é físico:
+  // carteira, gaveta, cofre. Nenhum deles aceita pix. Do outro lado, o dinheiro
+  // de uma conta em banco é virtual — tirá-lo de lá não é "pagar em espécie", é
+  // um SAQUE, que neste sistema é uma transferência para a conta física.
   function alternar(valor) {
-    const nova = formas.includes(valor)
-      ? formas.filter((f) => f !== valor)
-      : [...formas, valor]
+    let nova
+
+    if (formas.includes(valor)) {
+      nova = formas.filter((f) => f !== valor)
+    } else if (valor === 'DINHEIRO') {
+      // Marcar dinheiro apaga o resto: a conta passou a ser física.
+      nova = ['DINHEIRO']
+    } else {
+      // E marcar qualquer forma virtual apaga o dinheiro, pelo mesmo motivo ao
+      // contrário.
+      nova = [...formas.filter((f) => f !== 'DINHEIRO'), valor]
+    }
 
     // Desmarcar uma forma que era padrão precisa limpar aquele padrão junto. O
     // servidor recusa padrão fora da lista — e um 403 vindo daqui seria culpa
@@ -286,6 +302,8 @@ function SeletorDeFormas({ formasConhecidas, formas, padraoSaida, padraoEntrada,
       nova.includes(padraoEntrada) ? padraoEntrada : '',
     )
   }
+
+  const ehContaFisica = formas.includes('DINHEIRO')
 
   const marcadasNoSentido = (sentido) =>
     formasDoSentido(formasConhecidas, sentido).filter((f) => formas.includes(f.valor))
@@ -312,6 +330,23 @@ function SeletorDeFormas({ formasConhecidas, formas, padraoSaida, padraoEntrada,
           </label>
         ))}
       </fieldset>
+
+      <p className="dica">
+        {ehContaFisica ? (
+          <>
+            Esta é uma conta <strong>física</strong> — carteira, gaveta, cofre.
+            Ela guarda papel moeda, e papel moeda não recebe pix nem paga boleto.
+            Marcar qualquer outra forma desmarca o dinheiro.
+          </>
+        ) : (
+          <>
+            Esta é uma conta <strong>virtual</strong> — o dinheiro dela é um
+            número no banco. Marcar <strong>Dinheiro</strong> desmarca as
+            outras: tirar dinheiro daqui não é pagar em espécie, é um saque, que
+            neste sistema é uma transferência para a carteira.
+          </>
+        )}
+      </p>
 
       <div className="campos-lado-a-lado">
         <label>

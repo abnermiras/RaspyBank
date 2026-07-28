@@ -315,6 +315,16 @@ public class ContaServico {
 
         Set<FormaPagamento> desejadas = formas == null ? Set.of() : formas;
 
+        // Papel moeda ou dinheiro virtual, nunca os dois. Ver o javadoc de
+        // FormaPagamento.listaEhCoerente: uma lista com DINHEIRO e PIX
+        // descreveria uma conta que nao existe.
+        if (!FormaPagamento.listaEhCoerente(desejadas)) {
+            throw new OperacaoNaoPermitida(
+                "DINHEIRO e papel moeda e so existe em conta fisica — carteira, gaveta,"
+                    + " cofre — que nao aceita pix nem boleto. Escolha DINHEIRO sozinho,"
+                    + " ou qualquer combinacao das outras formas.");
+        }
+
         exigirPadraoCoerente(desejadas, padraoSaida, TipoLancamento.SAIDA);
         exigirPadraoCoerente(desejadas, padraoEntrada, TipoLancamento.ENTRADA);
 

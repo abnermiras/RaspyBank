@@ -313,3 +313,19 @@ Sem ela, apagar uma perna deixa a outra órfã e **R$ 100 aparecem do nada** no 
 - **A mensagem de encerrar conta deixou de mentir.** Ela mandava "transfira ou ajuste o valor antes" desde a fatia 2, e transferir não existia. Metade da instrução apontava para o vazio.
 
 **Verificado em 27/07/2026:** 173 testes verdes (eram 138), sendo 21 em `FormaPagamentoApiTest` e 14 em `TransferenciaApiTest`. O teste que mais importa é `TransferenciaApiTest.excluirUmaPernaExcluiAsDuas`: confere que o **patrimônio total** volta exatamente ao que era, em centavos inteiros.
+
+### Dois ajustes de uso (28/07/2026)
+
+Vieram de testar a V11 na tela, e os dois são regras de negócio que só aparecem quando alguém usa o sistema de verdade.
+
+**`DINHEIRO` desliga as outras formas, e vice-versa** (B-D41). Papel moeda só existe em lugar físico — carteira, bolso, gaveta, cofre — e nenhum deles recebe pix. Do outro lado, o dinheiro de uma conta em banco é virtual: tirá-lo de lá não é pagar em espécie, é um saque, que aqui é uma transferência para a conta física. As caixas se desligam entre si na tela, e o servidor recusa a combinação com 403.
+
+Esta é a **única** regra de forma que não virou chave composta no banco, e a assimetria é deliberada: violá-la não grava lançamento errado, só torna a lista da conta incoerente. Nenhum número fica errado — só uma opção sem sentido apareceria num seletor. Impor no banco custaria um gatilho de nível de comando.
+
+**Transferência saiu do seletor de categoria da T-08** (B-D42). Ela migrou inteira para o botão "Transferir"; escolhê-la num lançamento avulso criaria meia transferência, com `lancamento_par_id` nulo. O `POST /api/lancamentos` recusa com 403 — a tela não é a cerca, o bot do Telegram chega por fora.
+
+As outras duas sistêmicas continuam lançáveis, e isso importa: "Ajuste de saldo" é exatamente o caminho que a mensagem de encerrar conta com saldo indica, e "Não classificado" é o destino do bot quando ninguém classifica.
+
+Um efeito colateral bom no `MapaDeGastosApiTest`: ele criava a transferência do cenário com um `POST` de lançamento na categoria sistêmica, o que passou a ser recusado. Reescrito para usar o endpoint de transferência, o cenário ficou mais honesto — agora existem **duas** pernas, e o mapa precisa ignorar as duas.
+
+**Verificado em 28/07/2026:** 177 testes verdes (eram 173).

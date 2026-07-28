@@ -105,6 +105,23 @@ export default function Lancamentos() {
   const lista = dados?.lancamentos ?? []
   const totais = useMemo(() => somar(lista), [lista])
 
+  // Transferência sai do seletor do formulário, e SÓ dele.
+  //
+  // Ela migrou inteira para o botão "Transferir", que cria as duas pernas numa
+  // transação só. Escolhê-la aqui criaria meia transferência: dinheiro saindo
+  // de uma conta sem entrar em nenhuma, com o par nulo — exatamente o estado
+  // que o endpoint de transferência existe para impedir. O servidor recusa com
+  // 403 mesmo que alguém tente por fora, mas oferecer a opção e depois recusar
+  // é pior do que não oferecer.
+  //
+  // As outras duas sistêmicas FICAM. "Ajuste de saldo" é caminho legítimo e a
+  // mensagem de encerrar conta aponta para ele; "Não classificado" é o destino
+  // do bot do Telegram e de quem não quer classificar agora.
+  const categoriasLancaveis = useMemo(
+    () => apoio.categorias.filter((c) => c.codigo !== 'TRANSFERENCIA'),
+    [apoio.categorias],
+  )
+
   return (
     <section className="painel">
       <header className="cabecalho-painel">
@@ -186,6 +203,7 @@ export default function Lancamentos() {
         <FormularioDeLancamento
           lancamento={editando === 'novo' ? null : editando}
           apoio={apoio}
+          categoriasLancaveis={categoriasLancaveis}
           formasConhecidas={formasConhecidas}
           ocupado={ocupado}
           aoCancelar={() => setEditando(null)}
@@ -313,7 +331,7 @@ function somar(lista) {
 
 // ----------------------------------------------------------------------------
 
-function FormularioDeLancamento({ lancamento, apoio, formasConhecidas, ocupado, aoGravar, aoCancelar }) {
+function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formasConhecidas, ocupado, aoGravar, aoCancelar }) {
   const edicao = Boolean(lancamento)
 
   const [categoriaId, setCategoriaId] = useState(lancamento?.categoria?.id ?? '')
@@ -326,6 +344,15 @@ function FormularioDeLancamento({ lancamento, apoio, formasConhecidas, ocupado, 
   const [formaPagamento, setFormaPagamento] = useState(lancamento?.formaPagamento ?? '')
 
   const categoria = apoio.categorias.find((c) => c.id === categoriaId)
+
+  // Editar uma perna de transferência é legítimo (dá para corrigir valor e
+  // data), e o seletor precisa conseguir MOSTRAR a categoria dela. Sem esta
+  // linha, o campo apareceria vazio e a pessoa seria obrigada a trocar de
+  // categoria — que é justamente o que o servidor recusa com 403.
+  const opcoesDeCategoria =
+    categoria && !categoriasLancaveis.some((c) => c.id === categoria.id)
+      ? [categoria, ...categoriasLancaveis]
+      : categoriasLancaveis
   const subcategoriasDisponiveis = (categoria?.subcategorias ?? []).filter((s) => !s.arquivadaEm)
   const exigeTipo = categoria?.tipo === 'AMBOS'
 
@@ -427,7 +454,7 @@ function FormularioDeLancamento({ lancamento, apoio, formasConhecidas, ocupado, 
             onChange={(e) => trocarCategoria(e.target.value)}
           >
             <option value="" disabled>Escolha…</option>
-            {apoio.categorias.map((c) => (
+            {opcoesDeCategoria.map((c) => (
               <option key={c.id} value={c.id}>{c.nome}</option>
             ))}
           </select>

@@ -1,6 +1,7 @@
 package com.raspybank.lancamento.servico;
 
 import com.raspybank.lancamento.dominio.Categoria;
+import com.raspybank.lancamento.dominio.CodigoSistemico;
 import com.raspybank.lancamento.dominio.Conta;
 import com.raspybank.lancamento.dominio.ContaAmbiente;
 import com.raspybank.lancamento.dominio.ContaFormaPagamento;
@@ -130,6 +131,23 @@ public class LancamentoServico {
 
         Categoria categoria = exigirCategoria(ambienteId, dados.categoriaId());
         exigirContaNoAmbiente(ambienteId, dados.contaId());
+
+        // Transferencia so nasce em par, pela porta de TransferenciaServico.
+        //
+        // Um lancamento avulso em TRANSFERENCIA e exatamente a meia
+        // transferencia que a V11 existe para impedir: dinheiro sai de uma conta
+        // sem entrar em nenhuma, o par fica nulo, e nada denuncia isso depois —
+        // nenhum saldo isolado parece errado.
+        //
+        // A guarda esta no POST e NAO no PUT de proposito: editar uma perna
+        // existente e legitimo (ate propaga para a outra), e o par continua
+        // intacto porque a categoria nao muda.
+        if (CodigoSistemico.TRANSFERENCIA.name().equals(categoria.getCodigo())) {
+            throw new OperacaoNaoPermitida(
+                "Transferencia nao se lanca avulsa: ela e um par de lancamentos e"
+                    + " precisa de conta de origem e de destino."
+                    + " Use POST /api/transferencias.");
+        }
 
         TipoLancamento tipo = resolverTipo(categoria, dados.tipoDeclarado());
 

@@ -175,12 +175,45 @@ class FormaPagamentoApiTest extends IntegracaoTest {
             "A mensagem diz a forma e o sentido: " + erro);
     }
 
+    @Test
+    @Order(7)
+    @DisplayName("DINHEIRO junto com forma virtual e recusado: papel moeda ou virtual, nunca os dois")
+    void dinheiroNaoConviveComFormaVirtual() {
+        // DINHEIRO e papel moeda, e so existe em lugar fisico — carteira,
+        // gaveta, cofre. Nenhum deles recebe pix. Do outro lado, o dinheiro de
+        // uma conta em banco e virtual: tira-lo de la nao e pagar em especie, e
+        // um saque, que aqui e uma transferencia para a conta fisica.
+        ResponseEntity<Map> r = post("/api/contas", Map.of(
+            "nome", "Carteira Impossivel",
+            "natureza", "ATIVO",
+            "formasPagamento", List.of("DINHEIRO", "PIX")));
+
+        assertEquals(HttpStatus.FORBIDDEN, r.getStatusCode());
+        assertTrue(String.valueOf(r.getBody().get("erro")).contains("DINHEIRO"),
+            "A mensagem explica a exclusividade: " + r.getBody().get("erro"));
+    }
+
+    @Test
+    @Order(8)
+    @DisplayName("A mesma regra vale ao ALTERAR a lista, nao so ao criar")
+    void dinheiroExclusivoTambemNaEdicao() {
+        // A tela desliga as caixas sozinha, entao este caminho so aparece por
+        // FORA dela — o bot do Telegram, um curl. E exatamente por isso que a
+        // regra nao pode viver so no JavaScript.
+        ResponseEntity<Map> r = put("/api/contas/" + carteiraId + "/formas-pagamento",
+            Map.of("formas", List.of("DINHEIRO", "BOLETO"), "padraoSaida", "DINHEIRO"));
+
+        assertEquals(HttpStatus.FORBIDDEN, r.getStatusCode());
+        assertEquals(List.of("DINHEIRO"), formasDe(contaPorId(carteiraId)),
+            "A recusa nao pode ter deixado a lista pela metade");
+    }
+
     // =========================================================================
     // O padrao por sentido
     // =========================================================================
 
     @Test
-    @Order(7)
+    @Order(9)
     @DisplayName("Saida sem forma informada assume o padrao de SAIDA da conta")
     void saidaAssumeOPadraoDeSaida() {
         transporteId = criarCategoria("Transporte", "SAIDA");
@@ -198,7 +231,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(8)
+    @Order(10)
     @DisplayName("ENTRADA assume o padrao de ENTRADA: o salario e CREDITADO")
     void entradaAssumeOPadraoDeEntrada() {
         // A primeira versao desta funcionalidade recusava forma em ENTRADA, com
@@ -217,7 +250,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(9)
+    @Order(11)
     @DisplayName("O padrao e POR CONTA: o mesmo gasto na carteira vira DINHEIRO, nao DEBITO")
     void oPadraoEPorConta() {
         // Este e o teste que justifica o desenho. A regra pedida foi "se nao
@@ -235,7 +268,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(10)
+    @Order(12)
     @DisplayName("Saldo inicial NAO vira 'pago no debito' — a guarda da categoria sistemica")
     void saldoInicialNaoRecebePadrao() {
         // Sem esta guarda, o lancamento de abertura de toda conta nova
@@ -261,7 +294,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(11)
+    @Order(13)
     @DisplayName("Conta sem padrao daquele sentido grava nulo, sem escolher sozinha")
     void semPadraoGravaNulo() {
         ResponseEntity<Map> conta = post("/api/contas", Map.of(
@@ -287,7 +320,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     // =========================================================================
 
     @Test
-    @Order(12)
+    @Order(14)
     @DisplayName("Forma que a conta nao aceita e recusada, dizendo quais ela aceita")
     void formaForaDaListaDaConta() {
         ResponseEntity<Map> r = post("/api/lancamentos", Map.of(
@@ -303,7 +336,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(13)
+    @Order(15)
     @DisplayName("Forma que a conta aceita mas que NAO serve ao sentido tambem e recusada")
     void formaComSentidoErrado() {
         // A conta corrente aceita BOLETO e aceita CREDITO_EM_CONTA. A primeira
@@ -332,7 +365,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(14)
+    @Order(16)
     @DisplayName("Forma informada explicitamente vence o padrao")
     void formaInformadaVenceOPadrao() {
         ResponseEntity<Map> r = post("/api/lancamentos", Map.of(
@@ -354,7 +387,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     // =========================================================================
 
     @Test
-    @Order(15)
+    @Order(17)
     @DisplayName("Trocar o padrao de saida funciona — o indice parcial nao atrapalha")
     void trocarOPadrao() {
         // Marcar PIX antes de desmarcar DEBITO deixaria duas linhas padrao ao
@@ -372,7 +405,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(16)
+    @Order(18)
     @DisplayName("Remover forma que algum lancamento usa responde 409 e diz quantos")
     void removerFormaEmUsoConflita() {
         // A alternativa seria apagar a forma dos lancamentos antigos —
@@ -389,21 +422,28 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(17)
+    @Order(19)
     @DisplayName("Remover forma NAO usada funciona")
     void removerFormaLivreFunciona() {
-        ResponseEntity<Map> r = put("/api/contas/" + carteiraId + "/formas-pagamento",
-            Map.of("formas", List.of("DINHEIRO", "PIX"), "padraoSaida", "DINHEIRO"));
-        assertEquals(HttpStatus.OK, r.getStatusCode());
+        // Numa conta VIRTUAL, de proposito. A versao anterior deste teste
+        // acrescentava PIX a carteira para depois remove-lo, e a regra de
+        // exclusividade do dinheiro passou a proibir essa combinacao — o teste
+        // caiu com razao, e o cenario e que estava errado.
+        ResponseEntity<Map> conta = post("/api/contas", Map.of(
+            "nome", "Conta Digital",
+            "natureza", "ATIVO",
+            "formasPagamento", List.of("PIX", "BOLETO", "TED"),
+            "padraoSaida", "PIX"));
+        assertEquals(HttpStatus.CREATED, conta.getStatusCode());
 
-        ResponseEntity<Map> volta = put("/api/contas/" + carteiraId + "/formas-pagamento",
-            Map.of("formas", List.of("DINHEIRO"),
-                   "padraoSaida", "DINHEIRO",
-                   "padraoEntrada", "DINHEIRO"));
+        String id = String.valueOf(conta.getBody().get("id"));
 
-        assertEquals(HttpStatus.OK, volta.getStatusCode());
-        assertEquals(List.of("DINHEIRO"), formasDe(volta.getBody()),
-            "PIX saiu porque nenhum lancamento da carteira o usava");
+        ResponseEntity<Map> menor = put("/api/contas/" + id + "/formas-pagamento",
+            Map.of("formas", List.of("PIX"), "padraoSaida", "PIX"));
+
+        assertEquals(HttpStatus.OK, menor.getStatusCode());
+        assertEquals(List.of("PIX"), formasDe(menor.getBody()),
+            "BOLETO e TED sairam porque nenhum lancamento desta conta os usava");
     }
 
     // =========================================================================
@@ -411,7 +451,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     // =========================================================================
 
     @Test
-    @Order(18)
+    @Order(20)
     @DisplayName("PUT com forma vazia LIMPA o campo, sem reaplicar o padrao")
     void putComFormaVaziaLimpa() {
         // Diferente do POST de proposito: no PUT a tela ja mostra o valor atual,
@@ -432,7 +472,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(19)
+    @Order(21)
     @DisplayName("O extrato mostra a forma de cada lancamento")
     void oExtratoMostraAForma() {
         List<Map<String, Object>> extrato = extratoDoMes();
@@ -445,7 +485,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(20)
+    @Order(22)
     @DisplayName("Nada disso mexeu no saldo: forma de pagamento explica, nao calcula")
     void osSaldosNaoMudaram() {
         // A garantia mais importante do arquivo. Se um dia alguem fizer a forma
@@ -458,7 +498,7 @@ class FormaPagamentoApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(21)
+    @Order(23)
     @DisplayName("Sem token, os dois endpoints novos respondem 401")
     void semTokenNaoEntra() {
         assertEquals(HttpStatus.UNAUTHORIZED,

@@ -288,6 +288,47 @@ class TransferenciaApiTest extends IntegracaoTest {
 
     @Test
     @Order(13)
+    @DisplayName("Lancamento avulso na categoria Transferencia e recusado: ela so nasce em par")
+    void naoSeLancaTransferenciaAvulsa() {
+        // A T-08 tirou Transferencia do seletor de categoria, mas a tela nao e
+        // a cerca: o bot do Telegram e um curl chegam por fora. Um lancamento
+        // avulso aqui seria meia transferencia — dinheiro saindo de uma conta
+        // sem entrar em nenhuma, com o par nulo, e nenhum saldo isolado
+        // parecendo errado.
+        String transferenciaId = idDaCategoriaSistemica("TRANSFERENCIA");
+
+        ResponseEntity<Map> r = post("/api/lancamentos", Map.of(
+            "contaId", nubankId,
+            "categoriaId", transferenciaId,
+            "tipo", "SAIDA",
+            "valor", "10.00",
+            "dataCaixa", LocalDate.now().toString()));
+
+        assertEquals(HttpStatus.FORBIDDEN, r.getStatusCode());
+        assertTrue(String.valueOf(r.getBody().get("erro")).contains("/api/transferencias"),
+            "A recusa diz o caminho certo: " + r.getBody().get("erro"));
+    }
+
+    @Test
+    @Order(14)
+    @DisplayName("Mas AJUSTE continua lancavel: encerrar conta com saldo manda ajustar")
+    void ajusteContinuaLancavel() {
+        // A guarda e so de TRANSFERENCIA. "Ajuste de saldo" e caminho legitimo —
+        // a mensagem de encerrar conta com saldo aponta para ele — e "Nao
+        // classificado" e o destino do bot do Telegram.
+        ResponseEntity<Map> r = post("/api/lancamentos", Map.of(
+            "contaId", itauId,
+            "categoriaId", idDaCategoriaSistemica("AJUSTE"),
+            "tipo", "ENTRADA",
+            "valor", "1.00",
+            "dataCaixa", LocalDate.now().toString(),
+            "descricao", "Ajuste de centavos"));
+
+        assertEquals(HttpStatus.CREATED, r.getStatusCode());
+    }
+
+    @Test
+    @Order(15)
     @DisplayName("Transferencia nao entra no mapa de gastos (B-D15)")
     void transferenciaNaoInflaOMapa() {
         // O saque de 100 reais e uma saida da conta corrente. Se ele contasse
@@ -300,7 +341,7 @@ class TransferenciaApiTest extends IntegracaoTest {
     }
 
     @Test
-    @Order(14)
+    @Order(16)
     @DisplayName("Sem token, transferir responde 401")
     void semTokenNaoEntra() {
         assertEquals(HttpStatus.UNAUTHORIZED, http.postForEntity(
@@ -333,6 +374,16 @@ class TransferenciaApiTest extends IntegracaoTest {
         ResponseEntity<Map> r = post("/api/contas", corpo);
         assertEquals(HttpStatus.CREATED, r.getStatusCode());
         return String.valueOf(r.getBody().get("id"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private String idDaCategoriaSistemica(String codigo) {
+        ResponseEntity<Map> r = get("/api/categorias");
+        return ((List<Map<String, Object>>) r.getBody().get("categorias")).stream()
+            .filter(c -> codigo.equals(c.get("codigo")))
+            .map(c -> String.valueOf(c.get("id")))
+            .findFirst()
+            .orElseThrow();
     }
 
     private String criarCategoria(String nome, String tipo) {

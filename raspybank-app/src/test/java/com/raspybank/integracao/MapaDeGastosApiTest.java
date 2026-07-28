@@ -50,7 +50,7 @@ class MapaDeGastosApiTest extends IntegracaoTest {
     private static String mercadoId;
     private static String feiraId;
     private static String salarioId;
-    private static String transferenciaId;
+    private static String carteiraId;
 
     // =========================================================================
 
@@ -229,11 +229,11 @@ class MapaDeGastosApiTest extends IntegracaoTest {
             Map.of("email", email, "senha", SENHA)).getBody().get("tokenAcesso");
 
         contaId = criar("/api/contas", Map.of("nome", "Conta Corrente", "natureza", "ATIVO"));
+        carteiraId = criar("/api/contas", Map.of("nome", "Carteira", "natureza", "ATIVO"));
         mercadoId = criar("/api/categorias", Map.of("nome", "Mercado", "tipo", "SAIDA"));
         salarioId = criar("/api/categorias", Map.of("nome", "Salario", "tipo", "ENTRADA"));
         feiraId = criar("/api/categorias/" + mercadoId + "/subcategorias",
             Map.of("nome", "Feira"));
-        transferenciaId = idDaSistemica("TRANSFERENCIA");
 
         // Janeiro: 120 na feira + 330 sem subcategoria = 450 de mercado.
         lancar(mercadoId, feiraId, "120.00", "2026-01-10", null);
@@ -249,7 +249,12 @@ class MapaDeGastosApiTest extends IntegracaoTest {
         lancar(mercadoId, null, "300.00", "2026-02-20", "PREVISTO");
 
         // Transferencia de 1.000: entra_no_mapa = false, nao deve aparecer.
-        lancar(transferenciaId, null, "1000.00", "2026-03-01", null, "SAIDA");
+        //
+        // Feita pelo endpoint de transferencia, e nao por um POST de lancamento
+        // na categoria TRANSFERENCIA — que passou a ser recusado com 403 na V11.
+        // O cenario ficou mais honesto de quebra: agora as DUAS pernas existem,
+        // e o mapa precisa ignorar as duas.
+        transferir(contaId, carteiraId, "1000.00", "2026-03-01");
     }
 
     private Map<String, Object> mapa(int ano) {
@@ -258,6 +263,18 @@ class MapaDeGastosApiTest extends IntegracaoTest {
             HttpMethod.GET, new HttpEntity<>(cabecalhos(token)), Map.class);
         assertEquals(HttpStatus.OK, r.getStatusCode());
         return r.getBody();
+    }
+
+    /** As duas pernas numa transacao so — a unica porta que cria transferencia. */
+    private void transferir(String origemId, String destinoId, String valor, String data) {
+        ResponseEntity<Map> r = postAutenticado("/api/transferencias", Map.of(
+            "contaOrigemId", origemId,
+            "contaDestinoId", destinoId,
+            "valor", valor,
+            "dataCaixa", data));
+
+        assertEquals(HttpStatus.CREATED, r.getStatusCode(),
+            "Falhou ao transferir: " + r.getBody());
     }
 
     private void lancar(String categoriaId, String subcategoriaId, String valor,
@@ -323,16 +340,6 @@ class MapaDeGastosApiTest extends IntegracaoTest {
     }
 
     @SuppressWarnings("unchecked")
-    private String idDaSistemica(String codigo) {
-        ResponseEntity<Map> r = http.exchange("/api/categorias", HttpMethod.GET,
-            new HttpEntity<>(cabecalhos(token)), Map.class);
-        var lista = (List<Map<String, Object>>) r.getBody().get("categorias");
-        return lista.stream()
-            .filter(c -> codigo.equals(c.get("codigo")))
-            .map(c -> String.valueOf(c.get("id")))
-            .findFirst()
-            .orElseThrow();
-    }
 
     private static HttpHeaders cabecalhos(String bearer) {
         HttpHeaders h = new HttpHeaders();

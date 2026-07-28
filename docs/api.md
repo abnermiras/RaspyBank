@@ -157,6 +157,8 @@ As escritas respondem na **mesma forma** do `GET`, com saldo e vínculos recalcu
 ```
 Substitui a lista **inteira**, não acrescenta — a tela mostra as caixas com as marcadas, então o que ela envia já é o estado desejado. `formas: []` deixa a conta sem nenhuma; padrão `null` é válido (aceitar várias sem ter preferência).
 
+**`DINHEIRO` é exclusivo** (B-D41): ou a lista tem só `DINHEIRO`, ou não tem `DINHEIRO` nenhum. Papel moeda só existe em conta física — carteira, gaveta, cofre — e nenhuma delas recebe pix; conta em banco guarda dinheiro virtual, e tirá-lo de lá é um saque, não pagamento em espécie. `["DINHEIRO", "PIX"]` responde **403**.
+
 **Dois padrões, um por sentido** (B-D31). Entrada também tem "como o dinheiro se moveu": o salário é *creditado*. Cada padrão precisa estar em `formas` **e** aceitar o sentido correspondente — `padraoSaida: "CREDITO_EM_CONTA"` responde **403**, porque não se paga gasolina com crédito em conta.
 
 Endpoint próprio e não um campo no `PUT /{id}` porque os riscos são diferentes: renomear nunca falha, mexer na lista pode ser recusado — e juntar os dois faria uma recusa dessas impedir também a troca de nome, que não tinha nada a ver.
@@ -237,6 +239,8 @@ Sete campos, e três ausências que são decisão, não esquecimento:
 - **sem `ambienteId`** — vem da sessão (B-D2);
 - **sem `situacao`** — deriva de `dataCaixa`: passado ou hoje → `REALIZADO`, futuro → `PREVISTO` (B-D9 / R9);
 - **sem `tipo`** — deriva de `categoria.tipo` (F12); quando a categoria é `AMBOS`, aí sim o campo `tipo` passa a ser obrigatório no corpo.
+
+**403 na categoria `TRANSFERENCIA`** (B-D42). Ela só nasce em par, por `POST /api/transferencias` — um lançamento avulso aqui seria meia transferência, com dinheiro saindo de uma conta sem entrar em nenhuma. As outras duas sistêmicas continuam aceitas: `AJUSTE` é o caminho que a mensagem de encerrar conta indica, e `NAO_CLASSIFICADO` é o destino do bot do Telegram. A guarda **não** vale no `PUT`: editar uma perna existente é legítimo.
 
 `dataCompetencia` é opcional e, ausente, copia `dataCaixa` (F14). **403** se a conta não pertencer ao ambiente ativo — a restrição de B-D2 é conferida no banco, e o 403 é a tradução dela.
 
