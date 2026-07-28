@@ -99,9 +99,9 @@ public class ContaServico {
         // contra o extrato do banco.
         vencidos.realizarVencidos(ambienteId, LocalDate.now());
 
-        List<Conta> lista = incluirEncerradas
-            ? contas.doAmbiente(ambienteId)
-            : contas.ativasDoAmbiente(ambienteId);
+        // Bancarias: o cartao e uma conta, mas nao e um lugar onde se guarda
+        // dinheiro, e mostra-lo aqui confunde (B-D62). Ele tem tela propria.
+        List<Conta> lista = contas.bancariasDoAmbiente(ambienteId, incluirEncerradas);
 
         if (lista.isEmpty()) {
             return List.of();

@@ -163,7 +163,8 @@ class DominioRlsTest extends IntegracaoTest {
                 }
             }
 
-            assertEquals(List.of("AJUSTE", "NAO_CLASSIFICADO", "TRANSFERENCIA"), codigos,
+            assertEquals(List.of("AJUSTE", "NAO_CLASSIFICADO", "PAGAMENTO_FATURA", "TRANSFERENCIA"),
+                         codigos,
                 "A V5 criava ambiente sem categoria nenhuma; a V10 devia ter consertado (B-D16)");
         }
     }
@@ -183,6 +184,9 @@ class DominioRlsTest extends IntegracaoTest {
                 "Mover dinheiro entre contas proprias nao e gasto");
             assertEquals(false, entraNoMapa(c, "AJUSTE"),
                 "Ajuste e correcao contabil, nao despesa");
+            assertEquals(false, entraNoMapa(c, "PAGAMENTO_FATURA"),
+                "Os gastos do cartao ja entraram um a um: contar o pagamento"
+                    + " somaria a mesma despesa duas vezes (B-D59)");
         }
     }
 
@@ -221,8 +225,8 @@ class DominioRlsTest extends IntegracaoTest {
     void categoriaDoOutroInvisivel() throws SQLException {
         try (Connection c = comoApp()) {
             assumirIdentidade(c, usuarioA);
-            assertEquals(3, contar(c, "SELECT count(*) FROM categoria"),
-                "Alice deveria ver apenas as tres sistemicas DELA");
+            assertEquals(4, contar(c, "SELECT count(*) FROM categoria"),
+                "Alice deveria ver apenas as sistemicas DELA");
 
             // F9: sistemicas sao COPIADAS por ambiente, nao compartilhadas.
             // Se fossem compartilhadas, este id seria o mesmo dos dois lados.

@@ -61,6 +61,17 @@ public class MapaDeGastosServico {
 
     @Transactional(readOnly = true)
     public Mapa montar(UUID ambienteId, int ano) {
+        return montar(ambienteId, ano, null);
+    }
+
+    /**
+     * O mapa com o recorte de conta (B-D54).
+     *
+     * @param soCartao nulo traz tudo, {@code TRUE} so gasto de cartao,
+     *                 {@code FALSE} so o que nao passou por cartao
+     */
+    @Transactional(readOnly = true)
+    public Mapa montar(UUID ambienteId, int ano, Boolean soCartao) {
 
         // B-D10 separa realizado de previsto em cada celula. Sem a virada, um
         // gasto de agosto que ja aconteceu apareceria na linha de previsto — e
@@ -68,7 +79,7 @@ public class MapaDeGastosServico {
         vencidos.realizarVencidos(ambienteId, java.time.LocalDate.now());
 
 
-        List<LinhaDoMapa> linhas = lancamentos.mapaDoAno(ambienteId, ano);
+        List<LinhaDoMapa> linhas = lancamentos.mapaDoAno(ambienteId, ano, soCartao);
 
         Bloco saidas = bloco(linhas, TipoLancamento.SAIDA);
         Bloco entradas = bloco(linhas, TipoLancamento.ENTRADA);

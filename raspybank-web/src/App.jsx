@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom
 import { ProvedorDeAutenticacao, useAutenticacao } from './contexto/Autenticacao.jsx'
 import Casca from './telas/Casca.jsx'
 import Categorias from './telas/Categorias.jsx'
+import Cartoes from './telas/Cartoes.jsx'
 import Contas from './telas/Contas.jsx'
 import Entrada from './telas/Entrada.jsx'
 import Lancamentos from './telas/Lancamentos.jsx'
@@ -30,6 +31,7 @@ export default function App() {
               <Route path="/lancamentos" element={<Lancamentos />} />
               <Route path="/categorias" element={<Categorias />} />
               <Route path="/contas" element={<Contas />} />
+              <Route path="/cartoes" element={<Cartoes />} />
               <Route index element={<Navigate to="/mapa" replace />} />
             </Route>
           </Route>

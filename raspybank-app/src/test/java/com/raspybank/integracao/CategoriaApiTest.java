@@ -58,17 +58,20 @@ class CategoriaApiTest extends IntegracaoTest {
 
     @Test
     @Order(1)
-    @DisplayName("Ambiente novo ja nasce com as tres sistemicas, e so com elas (F13 / B-D14)")
+    @DisplayName("Ambiente novo ja nasce com as sistemicas, e so com elas (F13 / B-D14)")
     void ambienteNasceComAsTresSistemicas() {
         autenticar();
 
         List<Map<String, Object>> lista = listar(false);
 
-        assertEquals(3, lista.size(),
+        // Quatro desde a V12: PAGAMENTO_FATURA entrou junto com o cartao, e ja
+        // estava reservada em B-D13 para este momento.
+        assertEquals(4, lista.size(),
             "F13 ao pe da letra: sem kit inicial de categorias editaveis (B-D14)");
 
         var codigos = lista.stream().map(c -> String.valueOf(c.get("codigo"))).sorted().toList();
-        assertEquals(List.of("AJUSTE", "NAO_CLASSIFICADO", "TRANSFERENCIA"), codigos);
+        assertEquals(List.of("AJUSTE", "NAO_CLASSIFICADO", "PAGAMENTO_FATURA", "TRANSFERENCIA"),
+                     codigos);
 
         // O par de flags que B-D15 separou, visivel no contrato: a tela usa
         // 'sistemica' para o cadeado e 'entraNoMapa' para explicar a ausencia.

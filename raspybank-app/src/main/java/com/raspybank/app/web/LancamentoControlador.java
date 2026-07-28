@@ -11,6 +11,8 @@ import com.raspybank.lancamento.servico.LancamentoServico;
 import com.raspybank.shared.contexto.ContextoRequisicao;
 import com.raspybank.shared.erro.OperacaoNaoPermitida;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -174,13 +176,39 @@ public class LancamentoControlador {
          * nos dois verbos: no POST cai na forma padrao da conta, no PUT limpa o
          * campo. Ver {@code LancamentoServico.resolverFormaDePagamento}.
          */
-        FormaPagamento formaPagamento
+        FormaPagamento formaPagamento,
+
+        /**
+         * Compra parcelada — so faz sentido em conta que e cartao (V12). Nulo ou
+         * 1 e a vista. O residuo dos centavos vai na PRIMEIRA parcela (F23).
+         */
+        @Min(value = 1, message = "parcelas deve ser pelo menos 1")
+        @Max(value = 99, message = "parcelas deve ser no maximo 99")
+        Integer parcelas,
+
+        /**
+         * A fatura que cobra a compra. Ausente no POST, o servidor escolhe a
+         * primeira aberta cujo fechamento ainda nao passou. No PUT, MOVE o
+         * lancamento de ciclo — e a fatura de destino precisa estar aberta.
+         */
+        UUID faturaId,
+
+        /**
+         * Qual plastico ou virtual fez a compra (V13).
+         *
+         * <p>Quando presente, {@code contaId} e o BANCO e o lancamento e
+         * redirecionado para a conta do cartao (B-D61) — ninguem pensa "vou
+         * gastar na conta do cartao", pensa "paguei no cartao". Nao pode vir
+         * junto com {@code formaPagamento}: o cartao ja e a resposta.</p>
+         */
+        UUID cartaoEmitidoId
     ) {
         LancamentoServico.Dados paraDados() {
             return new LancamentoServico.Dados(
                 contaId, categoriaId, subcategoriaId, tipo,
                 new BigDecimal(valor), dataCaixa, dataCompetencia,
-                descricao, observacao, responsavelId, situacao, formaPagamento);
+                descricao, observacao, responsavelId, situacao, formaPagamento,
+                parcelas, faturaId, cartaoEmitidoId);
         }
     }
 
@@ -215,6 +243,24 @@ public class LancamentoControlador {
          */
         UUID lancamentoParId,
 
+        /** A fatura que cobra esta compra. Nulo em lancamento de conta comum. */
+        UUID faturaId,
+
+        /**
+         * O cartao que fez a compra, quando houve um. A coluna {@code conta}
+         * acima ja mostra o BANCO — os dois juntos leem "Nubank · Black
+         * ****4352", que e como a pessoa escolheu ao lancar.
+         */
+        CartaoResumo cartao,
+
+        /**
+         * Nulos quando a compra foi a vista. Os tres andam juntos: dizer
+         * "parcela 3" sem dizer de quantas nao daria a tela o que mostrar.
+         */
+        UUID grupoParcelamentoId,
+        Short parcelaNumero,
+        Short parcelaTotal,
+
         OffsetDateTime criadoEm
     ) {
         static LancamentoResposta de(LancamentoServico.Item item) {
@@ -228,7 +274,10 @@ public class LancamentoControlador {
                 referencia(item.categoria()),
                 referencia(item.subcategoria()),
                 l.getResponsavelId(), l.getFormaPagamento(),
-                l.getLancamentoParId(), l.getCriadoEm());
+                l.getLancamentoParId(), l.getFaturaId(),
+                CartaoResumo.de(item.cartaoEmitido()),
+                l.getGrupoParcelamentoId(), l.getParcelaNumero(), l.getParcelaTotal(),
+                l.getCriadoEm());
         }
 
         private static Referencia referencia(Conta c) {
@@ -245,4 +294,12 @@ public class LancamentoControlador {
     }
 
     public record Referencia(UUID id, String nome) {}
+
+    /** O plastico ou virtual, no formato que a tela mostra: "Black ****4352". */
+    public record CartaoResumo(UUID id, String nomeTitular, String tipo, String finalDoCartao) {
+        static CartaoResumo de(com.raspybank.lancamento.dominio.CartaoEmitido e) {
+            return e == null ? null : new CartaoResumo(
+                e.getId(), e.getNomeTitular(), e.getTipo().name(), e.getFinalDoCartao());
+        }
+    }
 }

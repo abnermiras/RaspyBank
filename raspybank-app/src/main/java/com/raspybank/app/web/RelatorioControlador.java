@@ -48,12 +48,15 @@ public class RelatorioControlador {
      *            meses.
      */
     @GetMapping("/mapa-de-gastos")
-    public MapaResposta mapaDeGastos(@RequestParam(required = false) Integer ano) {
+    public MapaResposta mapaDeGastos(@RequestParam(required = false) Integer ano,
+                                     @RequestParam(required = false) FiltroDeConta contas) {
 
         UUID ambienteId = ambienteAtivo();
         int anoAlvo = ano != null ? ano : LocalDate.now().getYear();
 
-        return MapaResposta.de(mapa.montar(ambienteId, anoAlvo), resumoDoAmbiente(ambienteId));
+        return MapaResposta.de(
+            mapa.montar(ambienteId, anoAlvo, (contas == null ? FiltroDeConta.TODAS : contas).soCartao()),
+            resumoDoAmbiente(ambienteId));
     }
 
     // =========================================================================
@@ -82,6 +85,34 @@ public class RelatorioControlador {
     // =========================================================================
     // Contrato de saida
     // =========================================================================
+
+    /**
+     * O recorte de conta do mapa (B-D54).
+     *
+     * <p>Filtro no topo, e nao um terceiro numero por celula: B-D10 separou
+     * realizado de previsto com esforco, e um terceiro em doze colunas viraria
+     * sopa. Trocar a lente responde "quanto do meu mercado foi no cartao" sem
+     * poluir nada.</p>
+     */
+    public enum FiltroDeConta {
+
+        TODAS(null),
+
+        /** So o que passou por cartao — todo lancamento com fatura. */
+        CARTAO(Boolean.TRUE),
+
+        SEM_CARTAO(Boolean.FALSE);
+
+        private final Boolean soCartao;
+
+        FiltroDeConta(Boolean soCartao) {
+            this.soCartao = soCartao;
+        }
+
+        Boolean soCartao() {
+            return soCartao;
+        }
+    }
 
     public record MapaResposta(int ano, Referencia ambiente,
                                BlocoResposta saidas, BlocoResposta entradas,

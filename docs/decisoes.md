@@ -202,9 +202,9 @@ Nasceram do **primeiro teste de negócio do sistema em alpha**. Registram tanto 
 | B-D44 | **Previsto com data no passado deixou de ser um estado possível** | Consequência direta de B-D43, registrada porque quebrou um teste que dependia dela: o `MapaDeGastosApiTest` criava um `PREVISTO` com data passada para ser independente do dia em que a suíte roda. O cenário mudou para um previsto em dezembro. Quem escrever teste novo precisa saber: para ter um previsto, use data futura |
 | B-D40 | **Transferência tem endpoint próprio; uma perna nunca é criada sozinha.** E uma perna não muda de categoria | Dois `POST /api/lancamentos` em sequência deixariam, se o segundo falhasse, 100 reais tendo saído de uma conta sem terem entrado em nenhuma — e nada denunciaria isso depois. Sair de `TRANSFERENCIA` na edição deixaria o par com classificações diferentes em cada lado, e o mapa contaria como despesa metade de um movimento que não é gasto (B-D15) |
 
-# 4f. Decisões do Cartão de Crédito (28/07/2026) — desenho, ANTES do código
+# 4f. Decisões do Cartão de Crédito (28/07/2026)
 
-Escritas na varredura que precede a V12, no mesmo formato que precedeu a V10 e a V11. **Nada aqui foi implementado ainda.** O Abner trouxe a visão de negócio e pediu explicitamente para segurar o código até o entendimento estar fechado e autorizado.
+Escritas na varredura que precedeu a V12, no mesmo formato que precedeu a V10 e a V11 — o Abner trouxe a visão de negócio e pediu para segurar o código até o entendimento estar fechado. **Implementadas no mesmo dia, depois da autorização dele.**
 
 | # | Decisão | Motivo |
 |---|---|---|
@@ -222,6 +222,7 @@ Escritas na varredura que precede a V12, no mesmo formato que precedeu a V10 e a
 | B-D53 | **`cartao_emitido.nome_titular` é TEXTO; `usuario_id` fica nulo até o convite existir** | Ele quer registrar o adicional da Luciana agora, e os gastos dela já são gasto da casa. Mas convidar usuário é o I-08, que não existe. O texto permite registrar hoje; quando o convite chegar, preenche-se o `usuario_id` e nada mais muda. F22 continua valendo: `responsavel_id` é dimensão de análise, não de acesso |
 | B-D54 | **O mapa de gastos usa o MÊS DA FATURA**, e ganha um filtro de conta no topo em vez de um terceiro número na célula | Regime de caixa (P-T2) é o que o mapa inteiro já usa, e F14 já dizia que no cartão a `data_caixa` é mantida pela fatura. Compra de 10x em agosto vira R$ 100 em cada um dos dez meses seguintes, que é quando o dinheiro realmente sai. O filtro (`todas / só cartão / sem cartão`) responde "quanto do meu mercado foi no cartão" **sem tocar na célula** — B-D10 separou dois números com esforço, e um terceiro em doze colunas viraria sopa |
 | B-D55 | **Não existe tabela `parcela`.** Cada parcela é um `lancamento` numa fatura diferente, com `grupo_parcelamento_id`, `parcela_numero` e `parcela_total` | B-D1 listava `parcela` como tabela. Ao desenhar, ela não guardaria nada que não fosse derivável: o valor total é a soma das parcelas, a data da compra é a `data_competencia` que se repete em todas (F23, confirmado por ele — *"a data da compra repete, muda somente a fatura"*), e a quantidade é a contagem. Tabela que só guarda agregado contraria P1. **Custo assumido e registrado:** o `grupo_parcelamento_id` não tem tabela-alvo, então não há FK garantindo o grupo — é identificador de correlação, e a integridade dele fica na aplicação |
+| B-D60 | **Fatura VAZIA nunca está vencida** | Custou um teste para aparecer, e é o tipo de coisa que só o uso revela: um cartão recém-criado tem faturas de ciclos que já passaram, todas fechadas e com total zero — e sem a condição `total > 0` todas nasciam gritando "vencida". Não há dívida atrasada onde não houve compra |
 | B-D56 | **Recorrência (F24/F25) fica FORA desta entrega** | Não é feature de cartão: Netflix no cartão e aluguel no débito automático têm o mesmo problema. Entra depois, sozinha, valendo para conta e cartão ao mesmo tempo. F25 (edição de série em três modos, sem tocar em realizado nem em fatura fechada) é a regra mais delicada do modelo inteiro, e somá-la à maior entrega já feita seria empilhar as duas coisas mais difíceis |
 
 ## Regras derivadas, registradas para não virarem discussão depois
@@ -230,6 +231,21 @@ Escritas na varredura que precede a V12, no mesmo formato que precedeu a V10 e a
 - **Faturas são pré-geradas 12 meses à frente** (F20), para o parcelamento ter onde cair.
 - **Compra lançada quando a fatura já fechou vai para a seguinte**, mesmo que a data da compra seja anterior ao fechamento. Palavras dele: *"fatura fechada, lançamento vai para o próximo"*.
 - **A data da compra é editável** (`data_competencia`), e a fatura do lançamento também — são campos independentes.
+
+# 4g. Ajustes dos testes de negócio do cartão (28/07/2026)
+
+Oito pontos que o uso real da V12 devolveu. Quatro deles — 3, 5, 7 e 8 da lista dele — eram a mesma ideia vista de ângulos diferentes.
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D61 | **O cartão é um MEIO DE PAGAMENTO da conta bancária, não uma conta.** A tela manda `contaId` = o banco e `cartaoEmitidoId` = o plástico; o servidor redireciona o lançamento para a conta do cartão. No extrato, a coluna Conta mostra o **banco** | Palavras dele: *"quando eu seleciono o primeiro combo box 'conta' lá lista somente as contas bancárias e não lista o Cartão; no combo do 'como foi pago' aparece a lista de meios de pagamento e mais os cartões daquela conta"*. Ninguém pensa "vou gastar na conta do cartão", pensa "paguei no cartão". **O armazenamento não mudou junto**, e não é conservadorismo: pagamento parcial da fatura e pagar a fatura do Nubank com a conta do C6 — os dois pedidos dele — exigem que a dívida seja saldo próprio. Se a compra debitasse o banco direto, a fatura não teria o que pagar |
+| B-D62 | **O cartão não aparece na tela de contas**, que passou a se chamar "Contas bancárias" | *"tratar o cartão de crédito como um banco confunde"*. O recorte fica no repositório (`bancariasDoAmbiente`) e não em cada tela, pelo motivo de sempre: quatro telas lembram, a quinta esquece. A dívida não sumiu — continua no patrimônio e inteira na tela de cartões |
+| B-D63 | **Criar o contrato cria o cartão FÍSICO junto**, com os quatro dígitos informados na mesma tela | *"quando eu crio um cartão eu preciso informar os 4 últimos dígitos, para que seja possível depois lá na hora de lançar o gasto dizer nubank - físico - 4352"*. Um contrato sem nenhum emitido não recebe compra nenhuma — nasceria inútil, e obrigaria duas etapas para uma coisa só |
+| B-D64 | **`lancamento.cartao_emitido_id`**: o lançamento passa a saber qual plástico ou virtual fez a compra | A V12 amarrou o lançamento à FATURA, e isso bastava para cobrar. Não bastava para explicar: *"quando eu clicar em Ver fatura, vai mostrar os gastos de cada cartão virtual, de cada cartão físico, no mesmo mês"*. Sem a coluna, uma fatura com o físico, dois virtuais e o adicional é uma pilha de gastos sem dono. `ck_lancamento_cartao_exige_fatura` é de **mão única**: quem tem cartão tem fatura, mas as duas pernas de um pagamento têm fatura e nenhum cartão |
+
+## Achado que a constraint da V13 denunciou
+
+`ck_lancamento_cartao_exige_fatura` pegou um defeito **da V12** no primeiro parcelamento: as parcelas 2..N eram gravadas antes de receber a fatura. Passou despercebido enquanto o cartão não existia na linha; a constraint nova o expôs no mesmo dia. Corrigido invertendo a ordem — fatura antes do `save`.
 
 # 5. Revisões registradas (R1–R6, sessão de requisitos)
 
@@ -277,4 +293,5 @@ Decisões que substituíram decisões anteriores durante o próprio processo. O 
 | V9 | Operação `ACESSO` no `ck_auditoria_operacao`; UPDATE dos logins históricos | ✔ |
 | V10 | Domínio, fatia 1 (B-D1): `categoria`, `subcategoria`, `conta`, `conta_ambiente`, `lancamento`; políticas RLS das cinco + `app_contas_do_usuario()`; gatilho de auditoria com canal (F26 + B-D6); outbox do lançamento (F28); sistêmicas (B-D13/B-D16); porta estreita `app_criar_conta()`; `DROP ambiente.status` (B-D5). Verificada por `DominioRlsTest` (14 cenários) | ✔ |
 | V11 | **Forma de pagamento e transferência** (B-D30 a B-D40): `forma_pagamento` e `forma_pagamento_sentido` (referência); `conta_forma_pagamento` (lista por conta + dois padrões, com RLS e auditoria); `lancamento.forma_pagamento` amarrada por **duas** chaves compostas; `lancamento.lancamento_par_id` mútuo com `ON DELETE CASCADE`, cumprindo F2/F16. Verificada por `FormaPagamentoApiTest` (21) e `TransferenciaApiTest` (14) | ✔ |
-| V12 | Domínio, fatia 2: `cartao`, `cartao_emitido`, `fatura` + colunas de parcelamento no lançamento. **Sem `parcela`** (B-D55) e **sem `regra_recorrencia`** (B-D56, entrega própria). Desenho fechado em §4f; código não iniciado. Sai junto da tela T-06. Resolve I-07 (estados da fatura). **Era a V11** até 27/07/2026, quando a forma de pagamento tomou o número — reserva era plano, não fato, e deixar um buraco na sequência para honrar uma anotação seria pior | ✘ |
+| V12 | Domínio, fatia 2: `cartao`, `cartao_emitido`, `fatura` + `fatura_id` e as colunas de parcelamento no lançamento; `PAGAMENTO_FATURA` como quarta sistêmica. **Sem `parcela`** (B-D55) e **sem `regra_recorrencia`** (B-D56, entrega própria). Sai junto da T-06 e resolve I-07. Verificada por `CartaoApiTest` | ✔ |
+| V13 | `lancamento.cartao_emitido_id` (B-D64): o lançamento passa a saber qual plástico ou virtual fez a compra, para o extrato da fatura ter dono. `ck_lancamento_cartao_exige_fatura` denunciou um defeito da V12 no primeiro parcelamento | ✔ |

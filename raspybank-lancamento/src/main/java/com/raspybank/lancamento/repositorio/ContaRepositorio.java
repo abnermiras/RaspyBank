@@ -51,4 +51,31 @@ public interface ContaRepositorio extends JpaRepository<Conta, UUID> {
          ORDER BY c.nome
         """)
     List<Conta> ativasDoAmbiente(@Param("ambienteId") UUID ambienteId);
+
+    /**
+     * As contas BANCARIAS: as mesmas de cima, tirando as que sao cartao.
+     *
+     * <p>O cartao e uma conta {@code PASSIVO} (B-D47) porque a divida dele e
+     * saldo, e saldo e soma de lancamentos. Mas nos testes de negocio de
+     * 28/07/2026 ficou claro que <b>mostrar o cartao na tela de contas
+     * confunde</b> — palavras dele: "tratar o cartao de credito como um banco
+     * confunde" (B-D62).</p>
+     *
+     * <p>Nao e a mesma coisa que esconder a divida: ela continua no patrimonio
+     * (F6) e aparece inteira na tela de cartoes. O que sai e o cartao fingindo
+     * ser um lugar onde se guarda dinheiro.</p>
+     *
+     * <p>O recorte fica no repositorio, e nao em cada tela, pelo motivo de
+     * sempre: quatro telas lembram, a quinta esquece.</p>
+     */
+    @Query("""
+        SELECT c FROM Conta c
+         WHERE c.id IN (
+               SELECT ca.contaId FROM ContaAmbiente ca WHERE ca.ambienteId = :ambienteId)
+           AND NOT EXISTS (SELECT 1 FROM Cartao k WHERE k.contaId = c.id)
+           AND (:incluirEncerradas = TRUE OR c.encerradaEm IS NULL)
+         ORDER BY c.nome
+        """)
+    List<Conta> bancariasDoAmbiente(@Param("ambienteId") UUID ambienteId,
+                                    @Param("incluirEncerradas") boolean incluirEncerradas);
 }

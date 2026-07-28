@@ -129,6 +129,52 @@ public class Lancamento {
     @Column(name = "lancamento_par_id")
     private UUID lancamentoParId;
 
+    /**
+     * A fatura que cobra este lancamento (V12). Nulo em conta comum.
+     *
+     * <p>Quando preenchido, a {@code dataCaixa} do lancamento e o VENCIMENTO da
+     * fatura (F14) — porque e nesse dia que o dinheiro sai do bolso, e o regime
+     * do sistema e de caixa (P-T2). E por isso que uma compra de 10x em agosto
+     * aparece no mapa como dez parcelas nos dez meses seguintes, e nao como mil
+     * reais em agosto (B-D54).</p>
+     */
+    @Column(name = "fatura_id")
+    private UUID faturaId;
+
+    /**
+     * Correlaciona as parcelas da mesma compra (B-D55).
+     *
+     * <p><b>Nao tem tabela-alvo, e isso e decisao registrada.</b> Uma tabela
+     * {@code parcela} so guardaria agregado — o total e a soma das parcelas, a
+     * data da compra e a {@code dataCompetencia} que se repete em todas (F23), a
+     * quantidade e a contagem — e agregado guardado contraria P1. O custo
+     * assumido: nao ha chave estrangeira garantindo o grupo, a integridade dele
+     * fica na aplicacao.</p>
+     */
+    @Column(name = "grupo_parcelamento_id")
+    private UUID grupoParcelamentoId;
+
+    @Column(name = "parcela_numero")
+    private Short parcelaNumero;
+
+    @Column(name = "parcela_total")
+    private Short parcelaTotal;
+
+    /**
+     * Qual plastico ou virtual fez a compra (V13). Nulo em lancamento comum.
+     *
+     * <p>A V12 amarrou o lancamento a FATURA, e isso bastava para cobrar. Nao
+     * bastava para explicar: uma fatura com o fisico, dois virtuais e o adicional
+     * da Luciana era uma pilha de gastos sem dono.</p>
+     *
+     * <p>Nulo tambem nas duas pernas de um PAGAMENTO de fatura — ninguem paga a
+     * fatura "com o cartao dela". Por isso a regra de
+     * {@code ck_lancamento_cartao_exige_fatura} e de mao unica: quem tem cartao
+     * tem fatura, mas quem tem fatura nao precisa ter cartao.</p>
+     */
+    @Column(name = "cartao_emitido_id")
+    private UUID cartaoEmitidoId;
+
     /** Quando o fato ocorreu — a compra, o servico prestado. */
     @Column(name = "data_competencia", nullable = false)
     private LocalDate dataCompetencia;
@@ -304,6 +350,45 @@ public class Lancamento {
         return lancamentoParId != null;
     }
 
+    /**
+     * Move a compra para outra fatura, trazendo a data de caixa junto.
+     *
+     * <p>As duas andam sempre juntas (F14): a data de caixa de um lancamento de
+     * cartao <b>e</b> o vencimento da fatura. Separa-las deixaria o extrato
+     * dizendo um mes e a fatura dizendo outro.</p>
+     *
+     * <p>Quem confere se a fatura de destino esta aberta e o servico — a
+     * entidade nao enxerga o estado dela.</p>
+     */
+    public void cobrarNaFatura(UUID faturaId, LocalDate vencimentoDaFatura, LocalDate hoje) {
+        this.faturaId = Objects.requireNonNull(faturaId, "faturaId e obrigatorio");
+        reagendar(vencimentoDaFatura, hoje);
+    }
+
+    /** Marca este lancamento como uma das parcelas de uma compra parcelada. */
+    public void comoParcela(UUID grupo, int numero, int total) {
+        if (numero < 1 || numero > total || total < 2 || total > 99) {
+            throw new OperacaoNaoPermitida(
+                "Parcelamento invalido: parcela " + numero + " de " + total);
+        }
+        this.grupoParcelamentoId = Objects.requireNonNull(grupo, "grupo e obrigatorio");
+        this.parcelaNumero = (short) numero;
+        this.parcelaTotal = (short) total;
+    }
+
+    public boolean ehParcelado() {
+        return grupoParcelamentoId != null;
+    }
+
+    public boolean ehDeCartao() {
+        return faturaId != null;
+    }
+
+    /** Registra com qual plastico ou virtual a compra foi feita (V13). */
+    public void compradoCom(UUID cartaoEmitidoId) {
+        this.cartaoEmitidoId = cartaoEmitidoId;
+    }
+
     public void atribuirA(UUID responsavelId)   { this.responsavelId = responsavelId; }
     public void moverPara(UUID contaId)         { this.contaId = Objects.requireNonNull(contaId); }
 
@@ -343,6 +428,11 @@ public class Lancamento {
     public String getObservacao()               { return observacao; }
     public FormaPagamento getFormaPagamento()   { return formaPagamento; }
     public UUID getLancamentoParId()            { return lancamentoParId; }
+    public UUID getFaturaId()                   { return faturaId; }
+    public UUID getGrupoParcelamentoId()        { return grupoParcelamentoId; }
+    public Short getParcelaNumero()             { return parcelaNumero; }
+    public Short getParcelaTotal()              { return parcelaTotal; }
+    public UUID getCartaoEmitidoId()            { return cartaoEmitidoId; }
     public LocalDate getDataCompetencia()       { return dataCompetencia; }
     public LocalDate getDataCaixa()             { return dataCaixa; }
     public UUID getCriadoPor()                  { return criadoPor; }

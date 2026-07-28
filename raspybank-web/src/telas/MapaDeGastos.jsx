@@ -18,7 +18,14 @@ import { ehZero, numero, NOMES_DOS_MESES } from '../util/formato.js'
 
 export default function MapaDeGastos() {
   const [ano, setAno] = useState(() => new Date().getFullYear())
-  const buscar = useCallback(() => relatorios.mapaDeGastos(ano), [ano])
+
+  // O recorte de conta (B-D54). Filtro no topo, e não um terceiro número por
+  // célula: B-D10 separou realizado de previsto com esforço, e um terceiro em
+  // doze colunas viraria sopa. Trocar a lente responde "quanto do meu mercado
+  // foi no cartão" sem poluir nada.
+  const [contas, setContas] = useState('TODAS')
+
+  const buscar = useCallback(() => relatorios.mapaDeGastos(ano, contas), [ano, contas])
   const { dados, carregando, erro } = useCarregar(buscar)
 
   return (
@@ -30,6 +37,17 @@ export default function MapaDeGastos() {
           <span className="mes-atual">{ano}</span>
           <button type="button" className="botao-texto" onClick={() => setAno(ano + 1)}>›</button>
         </div>
+
+        <select
+          className="filtro-contas"
+          value={contas}
+          onChange={(e) => setContas(e.target.value)}
+          title="Recorta o mapa por origem do gasto"
+        >
+          <option value="TODAS">Todas as contas</option>
+          <option value="CARTAO">Só cartão de crédito</option>
+          <option value="SEM_CARTAO">Sem cartão de crédito</option>
+        </select>
       </header>
 
       {erro && <p className="aviso" role="alert">{erro}</p>}

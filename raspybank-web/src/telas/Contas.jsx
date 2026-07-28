@@ -11,8 +11,16 @@ import {
 } from '../util/formasPagamento.js'
 
 // =============================================================================
-// T-05 — Contas
+// T-05 — Contas bancárias
 // =============================================================================
+// "Bancárias" no título e não só "Contas", porque o cartão de crédito TAMBÉM é
+// uma conta por baixo (B-D47) e não aparece aqui (B-D62). Palavras dele nos
+// testes de negócio: "tratar o cartão de crédito como um banco confunde".
+//
+// A dívida do cartão não sumiu — ela continua no patrimônio e aparece inteira
+// na tela de Cartões. O que saiu é o cartão fingindo ser um lugar onde se
+// guarda dinheiro.
+//
 // Dois saldos, não um (B-D26): `saldo` é o dinheiro que está lá; o outro
 // inclui o que já foi agendado. Somar os dois num número só faria o valor
 // significar duas coisas ao mesmo tempo — o mesmo defeito que B-D10 evitou no
@@ -87,7 +95,7 @@ export default function Contas() {
   return (
     <section className="painel">
       <header className="cabecalho-painel">
-        <h2>Contas</h2>
+        <h2>Contas bancárias</h2>
         <label className="alternador">
           <input
             type="checkbox"
@@ -112,8 +120,9 @@ export default function Contas() {
 
       {!carregando && lista.length === 0 && (
         <p className="texto-vazio">
-          Nenhuma conta ainda. Um lançamento precisa de uma conta, então esta é a
-          primeira coisa a criar.
+          Nenhuma conta bancária ainda. Um lançamento precisa de uma conta,
+          então esta é a primeira coisa a criar — e um cartão de crédito
+          precisa de uma para ficar embaixo.
         </p>
       )}
 

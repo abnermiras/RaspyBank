@@ -48,5 +48,21 @@ public enum CodigoSistemico {
      * mercado" pelo Telegram nao teria onde cair.
      * <b>Entra no mapa</b>: e gasto de verdade, so falta o rotulo.
      */
-    NAO_CLASSIFICADO
+    NAO_CLASSIFICADO,
+
+    /**
+     * O dinheiro saindo da conta para cobrir a fatura do cartao (V12).
+     *
+     * <p>Estava reservada desde B-D13, para "quando o cartao chegar". Chegou.</p>
+     *
+     * <p><b>Fora do mapa</b>, e errar aqui dobra o mes inteiro em silencio: os
+     * gastos do cartao ja entraram no mapa UM A UM, quando cada compra foi
+     * lancada. O pagamento e o dinheiro saindo para cobrir aqueles gastos —
+     * conta-lo de novo somaria a mesma despesa duas vezes (B-D59).</p>
+     *
+     * <p>Continua aparecendo no EXTRATO da conta pagadora, e isso e deliberado:
+     * o dinheiro saiu de la, e omitir seria mentir sobre o saldo. "Nao entra no
+     * mapa" e "nao existe" sao coisas diferentes.</p>
+     */
+    PAGAMENTO_FATURA
 }

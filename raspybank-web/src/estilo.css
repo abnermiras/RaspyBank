@@ -219,14 +219,6 @@ input.com-erro {
 }
 
 .item-menu.ativo { background: var(--destaque-claro); color: var(--destaque); font-weight: 600; }
-.item-menu.desabilitado { color: var(--texto-fraco); opacity: .55; cursor: not-allowed; }
-
-.nota-menu {
-    margin-top: 1.25rem;
-    font-size: .75rem;
-    color: var(--texto-fraco);
-}
-
 .centro {
     flex: 1;
     padding: 1.5rem;
@@ -614,4 +606,66 @@ code {
     color: var(--texto);
     font-weight: 600;
     border-bottom: 1px dotted currentColor;
+}
+
+/* ---------------------------------------------------------------------------
+   Cartões de crédito (V12)
+   --------------------------------------------------------------------------- */
+
+.lista-cartoes { list-style: none; padding: 0; margin: .5rem 0 0; }
+.lista-cartoes > li { border-bottom: 1px solid var(--borda); }
+
+.linha-cartao .saldos { align-items: flex-end; min-width: 13rem; }
+
+/* A barra do limite é a informação que a pessoa lê primeiro — antes dos
+   números. Por isso ela existe, e por isso ela fica vermelha ao estourar em vez
+   de simplesmente parar em 100%: o sistema não trava a compra (B-D48), então
+   estourar é um estado possível e precisa ser visível. */
+.barra-limite {
+    display: block;
+    width: 100%;
+    height: 4px;
+    margin-top: .3rem;
+    border-radius: 2px;
+    background: var(--borda);
+    overflow: hidden;
+}
+
+.barra-limite-preenchida {
+    display: block;
+    height: 100%;
+    background: var(--texto-fraco);
+    transition: width .2s ease;
+}
+
+.barra-limite-preenchida.estourado { background: var(--saida); }
+
+.painel-faturas {
+    padding: .5rem 0 1rem 1.4rem;
+    border-left: 2px solid var(--borda);
+    margin-left: .4rem;
+}
+
+.tabela-faturas {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .8rem;
+    margin-top: .5rem;
+}
+
+.tabela-faturas th,
+.tabela-faturas td { padding: .35rem .5rem; border-bottom: 1px solid var(--borda); }
+.tabela-faturas thead th { color: var(--texto-fraco); font-weight: 500; text-align: left; }
+.tabela-faturas .numerico { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* O filtro de contas do mapa (B-D54). Fica no topo, junto do navegador de ano,
+   porque as duas coisas são a mesma operação: escolher o recorte antes de ler. */
+.filtro-contas { font-size: .8rem; margin-left: .75rem; }
+
+/* O extrato de uma fatura, aberto dentro do painel dela. Recuado de novo para
+   deixar claro que é um nível abaixo — cartão › faturas › gastos. */
+.extrato-fatura {
+    margin: .75rem 0 .5rem 1rem;
+    padding-left: 1rem;
+    border-left: 2px solid var(--borda);
 }

@@ -345,3 +345,69 @@ Decisões em `decisoes.md` §4e (B-D43 e B-D44).
 **Um teste caiu, e o motivo é uma consequência que vale registrar:** o `MapaDeGastosApiTest` criava um `PREVISTO` com data **passada**, forçado por `PUT`, justamente para não depender do dia em que a suíte roda. Isso deixou de ser possível — previsto com data no passado é um estado que não sobrevive à primeira leitura. O cenário passou a usar dezembro.
 
 **Verificado em 28/07/2026:** 181 testes verdes (eram 177), sendo 4 novos em `SituacaoVencidaTest` — incluindo o que documenta o caminho do "não paguei, reagendo".
+
+---
+
+## 12. Cartão de crédito — V12 e T-06 (28/07/2026)
+
+A parte mais funda do domínio (F17–F23), e a primeira em que o desenho inteiro foi escrito **antes** de uma linha de código, por pedido dele: *"acho que por hora é legal dar uma segurada em código e só codificar depois de entendimento fechado e autorizado"*.
+
+Decisões em `decisoes.md` §4f (B-D45 a B-D60); contrato em `api.md` §6b.
+
+### O que o desenho prévio evitou
+
+Três coisas que teriam virado migração corretiva se descobertas no meio do código:
+
+**Não existe entidade "banco".** A leitura literal da frase dele — *"não consigo criar um cartão sem uma conta de banco criada antes"* — apontava para a `conta` que já existia. A confirmação veio do exemplo do Nubank com Black e Diamond: dois contratos, limites próprios, mesma conta de banco. Uma tabela `banco` não guardaria nada.
+
+**Não existe tabela `parcela`.** B-D1 a listava desde o começo. Ao desenhar, ela só guardaria agregado — o total é a soma, a data da compra é a competência repetida, a quantidade é a contagem. Virou três colunas no lançamento.
+
+**O estado da fatura não é um enum.** Eu tinha escrito cinco valores mutuamente exclusivos. Quando ele explicou que antecipar pagamento é como se libera limite, o caso "aberta e parcialmente paga" apareceu — e nesse enum ele não teria nome. Viraram três perguntas independentes: `ciclo`, `quitacao`, `vencida`.
+
+### Coisas que só apareceram ao fazer
+
+- **Fatura vazia nascia "vencida"** (B-D60). Um cartão criado hoje ganha faturas de ciclos que já passaram, fechadas e com total zero — e sem a condição `total > 0` todas apareciam atrasadas. Achado por um teste que eu escrevi para outra coisa.
+- **A primeira fatura da lista pode já estar fechada, e isso é correto.** As faturas nascem a partir do mês corrente, e se o fechamento daquele ciclo já passou a leitura o fecha. Um teste que supunha "a primeira está aberta" quebrou — e o teste é que estava errado.
+- **O fechamento recuando para sexta é visível nos dados.** Outubro de 2026 fecha dia 09 e não 10, porque 10/10 é sábado.
+- **`PAGAMENTO_FATURA` virou a quarta sistêmica**, e três testes que contavam três quebraram. A contagem estava certa em todos; o vocabulário é que cresceu.
+
+### Uma observação sobre o saldo do cartão na T-05
+
+O cartão é uma conta `PASSIVO` (B-D47), então ele aparece na lista de contas. Mas o **saldo realizado** dele pode ficar positivo de um jeito que confunde: as compras são cobradas na fatura futura, então nascem `PREVISTO`; um pagamento antecipado é `REALIZADO` hoje. Depois de antecipar R$ 200 de uma fatura de agosto, o cartão mostra `saldo 200,00` e `com previstos −1.250,00`.
+
+Os dois números estão certos e rotulados, mas o que interessa num cartão é **sempre o segundo** — a dívida contratada. Fica registrado como pendência de tela, não de domínio: qual dos dois números é o principal numa conta de cartão é escolha de produto.
+
+**Verificado em 28/07/2026:** 200 testes verdes (eram 181), sendo 19 novos em `CartaoApiTest`. V12 aplicada no banco de desenvolvimento real em 59 ms, e o fluxo inteiro conferido por HTTP: cartão com limite, adicional e virtual, compra à vista, geladeira em 10x, antecipação liberando limite, e o mapa separando gasto de cartão do resto.
+
+### Os testes de negócio do cartão (28/07/2026) — oito pontos
+
+Quatro deles eram a mesma ideia vista de ângulos diferentes: **o cartão é um meio de pagamento, não uma conta**.
+
+Decisões em `decisoes.md` §4g (B-D61 a B-D64).
+
+| # | O quê | Onde ficou |
+|---|---|---|
+| 1 | "Cartões" fantasma no menu, acinzentado, mais a nota abaixo | Removidos, com as duas regras de CSS que ficariam órfãs |
+| 2 | Botão "Ver" → extrato da fatura | T-06, dentro do painel de faturas |
+| 3 | Criar cartão virtual; extrato separa por cartão | Botão "Novo virtual" + coluna Cartão no extrato (exigiu a V13) |
+| 4 | Quatro dígitos na criação do cartão | O contrato cria o físico junto (B-D63) |
+| 5 | Conta = só bancárias; "como foi pago" = formas + cartões | `opcoesDePagamento` monta a lista única |
+| 6 | Título "Contas bancárias" | T-05 |
+| 7 | Cartão fora da tela de contas | `bancariasDoAmbiente`, no repositório |
+| 8 | Encerrar cartão na tela de cartões | T-06, ao lado de "Novo virtual" |
+
+### A inversão que dá nome a tudo
+
+Você lança em **"Nubank"** e escolhe **"Black · físico ····4352"** no mesmo combo onde escolheria débito ou pix. Escolher um cartão habilita o parcelamento.
+
+Por baixo, o lançamento continua morando na conta do cartão — e **isso não foi conservadorismo**. Duas coisas que ele mesmo pediu dependem de a dívida ser saldo próprio: **pagamento parcial** da fatura e **pagar a fatura do Nubank com a conta do C6**. Se a compra debitasse o banco direto, a fatura não teria o que pagar.
+
+A escolha de qual número mostrar no extrato veio dele: **o banco**. Ter escolhido "Nubank" ao lançar e ler "Black" no extrato seriam dois nomes para o mesmo lançamento em duas telas.
+
+### O defeito que a constraint nova denunciou
+
+`ck_lancamento_cartao_exige_fatura` — "quem tem cartão tem fatura" — pegou um erro **da V12** no primeiro parcelamento que rodou depois dela: as parcelas 2 em diante eram gravadas **antes** de receberem a fatura. Passava despercebido enquanto não havia cartão na linha; a constraint o expôs no mesmo dia em que nasceu.
+
+É o terceiro caso nesta semana em que uma regra virada impossibilidade estrutural encontrou algo que os testes não tinham encontrado.
+
+**Verificado em 28/07/2026:** 200 testes verdes. V13 aplicada no banco real em 12 ms, e o fluxo novo conferido por HTTP: cartão físico nascendo com o contrato, virtual dividindo limite e fatura, três compras com donos diferentes aparecendo separadas no extrato da fatura, o cartão fora da lista de contas, e um cartão do Nubank lançado na Carteira recusado com 403.

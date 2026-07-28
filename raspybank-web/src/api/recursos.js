@@ -77,6 +77,88 @@ export const transferencias = {
   criar: (dados) => pedirComRenovacao('/api/transferencias', json('POST', dados)),
 }
 
+// ------------------------------------------------------------------ cartões
+export const cartoes = {
+  listar: (incluirEncerrados = false) =>
+    pedirComRenovacao(`/api/cartoes?incluirEncerrados=${incluirEncerrados}`),
+
+  buscar: (id) => pedirComRenovacao(`/api/cartoes/${id}`),
+
+  criar: (dados) => pedirComRenovacao('/api/cartoes', json('POST', dados)),
+  alterar: (id, dados) => pedirComRenovacao(`/api/cartoes/${id}`, json('PUT', dados)),
+
+  encerrar: (id) => pedirComRenovacao(`/api/cartoes/${id}/encerrar`, json('POST')),
+  reabrir: (id) => pedirComRenovacao(`/api/cartoes/${id}/reabrir`, json('POST')),
+
+  emitir: (id, dados) =>
+    pedirComRenovacao(`/api/cartoes/${id}/emitidos`, json('POST', dados)),
+
+  cancelarEmitido: (id, emitidoId) =>
+    pedirComRenovacao(`/api/cartoes/${id}/emitidos/${emitidoId}/cancelar`, json('POST')),
+
+  reativarEmitido: (id, emitidoId) =>
+    pedirComRenovacao(`/api/cartoes/${id}/emitidos/${emitidoId}/reativar`, json('POST')),
+
+  faturas: (id, ano) => pedirComRenovacao(`/api/cartoes/${id}/faturas?ano=${ano}`),
+}
+
+/**
+ * O cartão é um MEIO DE PAGAMENTO da conta bancária, não uma conta (B-D61).
+ *
+ * Ninguém pensa "vou gastar na conta do cartão", pensa "paguei no cartão". A
+ * tela manda `contaId` = o banco e `cartaoEmitidoId` = o plástico, e o servidor
+ * redireciona o lançamento para a conta do cartão sem você ver.
+ *
+ * Devolve as opções que o combo "como foi pago" mostra: as formas daquela conta
+ * mais os cartões dela.
+ */
+export function opcoesDePagamento(conta, formasConhecidas, cartoesDoAmbiente, sentido) {
+  if (!conta) return []
+
+  const formas = formasConhecidas
+    .filter((f) => (conta.formasPagamento ?? []).includes(f.valor))
+    .filter((f) => f.sentidos.includes(sentido))
+    .map((f) => ({ chave: `forma:${f.valor}`, rotulo: f.nome, forma: f.valor, cartao: null }))
+
+  // Cartão de crédito só serve para SAÍDA: ninguém recebe salário no cartão.
+  const cartoes =
+    sentido === 'SAIDA'
+      ? cartoesDoAmbiente
+          .filter((c) => c.banco?.id === conta.id && !c.encerradoEm)
+          .flatMap((c) =>
+            (c.emitidos ?? [])
+              .filter((e) => !e.canceladoEm)
+              .map((e) => ({
+                chave: `cartao:${e.id}`,
+                rotulo: `${c.nome} · ${e.tipo === 'FISICO' ? 'físico' : 'virtual'} ····${e.finalDoCartao}`,
+                forma: null,
+                cartao: e.id,
+              })),
+          )
+      : []
+
+  return [...formas, ...cartoes]
+}
+
+// ------------------------------------------------------------------ faturas
+export const faturas = {
+  buscar: (id) => pedirComRenovacao(`/api/faturas/${id}`),
+  lancamentos: (id) => pedirComRenovacao(`/api/faturas/${id}/lancamentos`),
+
+  fechar: (id) => pedirComRenovacao(`/api/faturas/${id}/fechar`, json('POST')),
+  reabrir: (id) => pedirComRenovacao(`/api/faturas/${id}/reabrir`, json('POST')),
+
+  /**
+   * Paga total ou em parte, com a fatura aberta ou fechada.
+   *
+   * Antecipar não é conveniência: é como se libera limite (B-D57). Fatura
+   * aberta de 5.000 com 1.000 disponível e uma compra de 2.000 para fazer —
+   * paga 1.000, o disponível vira 2.000, a compra passa.
+   */
+  pagar: (id, dados) =>
+    pedirComRenovacao(`/api/faturas/${id}/pagamentos`, json('POST', dados)),
+}
+
 // --------------------------------------------------------------- lançamentos
 export const lancamentos = {
   /** `mes` é obrigatório no formato AAAA-MM. Os demais filtros são opcionais. */
@@ -95,6 +177,13 @@ export const lancamentos = {
 
 // ---------------------------------------------------------------- relatórios
 export const relatorios = {
-  mapaDeGastos: (ano) =>
-    pedirComRenovacao(`/api/relatorios/mapa-de-gastos?ano=${ano}`),
+  /**
+   * `contas` recorta o mapa: `TODAS` (padrão), `CARTAO`, `SEM_CARTAO`.
+   *
+   * Filtro no topo, e não um terceiro número por célula (B-D54): B-D10 separou
+   * realizado de previsto com esforço, e um terceiro em doze colunas viraria
+   * sopa. Trocar a lente responde "quanto do meu mercado foi no cartão".
+   */
+  mapaDeGastos: (ano, contas = 'TODAS') =>
+    pedirComRenovacao(`/api/relatorios/mapa-de-gastos?ano=${ano}&contas=${contas}`),
 }

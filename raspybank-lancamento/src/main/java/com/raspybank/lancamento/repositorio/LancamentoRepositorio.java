@@ -5,6 +5,7 @@ import com.raspybank.lancamento.dominio.Lancamento;
 import com.raspybank.lancamento.dominio.LinhaDoMapa;
 import com.raspybank.lancamento.dominio.SaldoDaConta;
 import com.raspybank.lancamento.dominio.SituacaoLancamento;
+import com.raspybank.lancamento.dominio.TotalDaFatura;
 import com.raspybank.lancamento.dominio.TipoLancamento;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -158,19 +159,32 @@ public interface LancamentoRepositorio extends JpaRepository<Lancamento, UUID> {
          WHERE l.ambienteId = :ambienteId
            AND l.dataCaixa BETWEEN :inicio AND :fim
            AND c.entraNoMapa = true
+           AND (:soCartao IS NULL
+                OR (:soCartao = TRUE  AND l.faturaId IS NOT NULL)
+                OR (:soCartao = FALSE AND l.faturaId IS NULL))
          GROUP BY l.tipo, l.categoriaId, c.nome, l.subcategoriaId, s.nome, month(l.dataCaixa)
         """)
     List<LinhaDoMapa> varrerParaOMapa(@Param("ambienteId") UUID ambienteId,
                                       @Param("inicio") LocalDate inicio,
                                       @Param("fim") LocalDate fim,
-                                      @Param("realizado") SituacaoLancamento realizado);
+                                      @Param("realizado") SituacaoLancamento realizado,
+                                      @Param("soCartao") Boolean soCartao);
 
-    /** Atalho: o parametro de situacao e sempre o mesmo. */
-    default List<LinhaDoMapa> mapaDoAno(UUID ambienteId, int ano) {
+    /**
+     * Atalho: a situacao e sempre a mesma, e o filtro de cartao e opcional.
+     *
+     * <p>{@code soCartao} nulo traz tudo; {@code TRUE} traz so o que tem fatura;
+     * {@code FALSE} traz so o que nao tem. E o filtro de B-D54, que responde
+     * "quanto do meu mercado foi no cartao" <b>sem tocar na celula</b> — B-D10
+     * separou dois numeros com esforco, e um terceiro em doze colunas viraria
+     * sopa.</p>
+     */
+    default List<LinhaDoMapa> mapaDoAno(UUID ambienteId, int ano, Boolean soCartao) {
         return varrerParaOMapa(ambienteId,
                                LocalDate.of(ano, 1, 1),
                                LocalDate.of(ano, 12, 31),
-                               SituacaoLancamento.REALIZADO);
+                               SituacaoLancamento.REALIZADO,
+                               soCartao);
     }
 
     /**
@@ -214,6 +228,49 @@ public interface LancamentoRepositorio extends JpaRepository<Lancamento, UUID> {
      * dizendo {@code PREVISTO} na mesma transacao, e a tela mostraria o valor
      * velho logo depois de o banco ter mudado.</p>
      */
+    /**
+     * Compras e pagamentos de varias faturas de uma vez.
+     *
+     * <p>Uma consulta para a tela inteira, e nao uma por fatura — o mesmo
+     * criterio de {@code somarPorConta}. Com doze faturas a diferenca e
+     * invisivel; e o habito que decide, porque a versao ingenua nunca da sinal
+     * de que esta errada, so fica devagar.</p>
+     *
+     * <p><b>O filtro por conta nao e redundante.</b> O pagamento marca a fatura
+     * nas duas pernas (B-D59), entao sem ele a saida da conta pagadora entraria
+     * no total de compras do cartao.</p>
+     */
+    @Query("""
+        SELECT new com.raspybank.lancamento.dominio.TotalDaFatura(
+                   l.faturaId,
+                   SUM(CASE WHEN l.contaId = :contaDoCartao AND l.tipo = :saida
+                            THEN l.valor ELSE 0 END),
+                   SUM(CASE WHEN l.contaId = :contaDoCartao AND l.tipo = :entrada
+                            THEN l.valor ELSE 0 END))
+          FROM Lancamento l
+         WHERE l.faturaId IN :faturaIds
+         GROUP BY l.faturaId
+        """)
+    List<TotalDaFatura> somarPorFatura(@Param("faturaIds") Collection<UUID> faturaIds,
+                                       @Param("contaDoCartao") UUID contaDoCartao,
+                                       @Param("saida") TipoLancamento saida,
+                                       @Param("entrada") TipoLancamento entrada);
+
+    /** Atalho do caso comum: os dois enums sao sempre os mesmos. */
+    default List<TotalDaFatura> totaisDasFaturas(Collection<UUID> faturaIds, UUID contaDoCartao) {
+        if (faturaIds.isEmpty()) {
+            return List.of();
+        }
+        return somarPorFatura(faturaIds, contaDoCartao,
+                              TipoLancamento.SAIDA, TipoLancamento.ENTRADA);
+    }
+
+    /** Os lancamentos de uma fatura, para a tela do cartao. */
+    List<Lancamento> findByFaturaIdOrderByDataCompetenciaDescCriadoEmDesc(UUID faturaId);
+
+    /** Guarda a remocao de uma fatura e o encerramento de um cartao. */
+    long countByFaturaId(UUID faturaId);
+
     @Modifying(clearAutomatically = true)
     @Query("""
         UPDATE Lancamento l

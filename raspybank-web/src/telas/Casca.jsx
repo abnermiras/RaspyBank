@@ -7,8 +7,10 @@ import { useAutenticacao } from '../contexto/Autenticacao.jsx'
 // Topo, menu e a área que muda. Tudo o que vier das fatias seguintes entra no
 // <Outlet/>, sem mexer aqui.
 //
-// Depois da fatia 6, só "Cartões" segue acinzentado — ele ficou fora do mínimo
-// aceitável de propósito e não tem API nem tela. Todo o resto navega.
+// Todo item do menu navega. O acinzentado de "Cartões" e a nota que o explicava
+// saíram na V12, quando o cartão passou a existir de verdade — placeholder que
+// sobrevive à feature vira mentira na tela, e ali ele aparecia DUAS vezes: o
+// link real e o fantasma logo abaixo.
 // =============================================================================
 
 const ITENS = [
@@ -16,6 +18,7 @@ const ITENS = [
   { rotulo: 'Lançamentos', caminho: '/lancamentos' },
   { rotulo: 'Categorias', caminho: '/categorias' },
   { rotulo: 'Contas', caminho: '/contas' },
+  { rotulo: 'Cartões', caminho: '/cartoes' },
 ]
 
 export default function Casca() {
@@ -62,18 +65,6 @@ export default function Casca() {
               {rotulo}
             </NavLink>
           ))}
-
-          <span
-            className="item-menu desabilitado"
-            title="Cartão de crédito ficou fora do mínimo aceitável: ele tem fatura, e fatura é um assunto próprio."
-          >
-            Cartões
-          </span>
-
-          <p className="nota-menu">
-            Cartões vêm depois — fatura é assunto próprio, e o mínimo aceitável
-            fecha sem ela.
-          </p>
         </nav>
 
         <main className="centro">

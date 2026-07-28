@@ -390,9 +390,9 @@ Regras de construção:
 
 ---
 
-## 6b. Cartões e faturas — DESENHO, ainda não implementado
+## 6b. Cartões e faturas
 
-> **Nada desta seção existe em código.** Foi escrita na varredura que precede a V12, para ser lida e corrigida antes de qualquer migração — o mesmo procedimento que precedeu a V10 e a V11, e que nas duas vezes evitou corretiva. Decisões em `decisoes.md` §4f (B-D45 a B-D56).
+> Escrita na varredura que **precedeu** a V12, para ser lida e corrigida antes de qualquer migração — o mesmo procedimento que precedeu a V10 e a V11, e que nas três vezes evitou corretiva. Implementada depois da autorização, no mesmo dia. Decisões em `decisoes.md` §4f (B-D45 a B-D60).
 
 ### As três camadas
 

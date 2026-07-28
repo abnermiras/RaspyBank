@@ -4,7 +4,9 @@ import {
   categorias as apiCategorias,
   contas as apiContas,
   lancamentos as apiLancamentos,
+  opcoesDePagamento,
   transferencias as apiTransferencias,
+  cartoes as apiCartoes,
 } from '../api/recursos.js'
 import Aviso from '../componentes/Aviso.jsx'
 import { useCarregar } from '../ganchos/useCarregar.js'
@@ -37,6 +39,12 @@ import {
 // TRANSFERÊNCIA é o único caminho desta tela que NÃO cria um lançamento: cria
 // dois, ligados, numa transação só. A primeira perna sozinha já seria um saldo
 // errado, e é por isso que ela tem endpoint próprio em vez de dois POSTs.
+//
+// O CARTÃO É UM MEIO DE PAGAMENTO, não uma conta (B-D61). O seletor de conta
+// mostra só contas bancárias; o combo "como foi pago" mostra as formas daquela
+// conta MAIS os cartões dela. Escolher um cartão habilita o parcelamento e
+// manda `cartaoEmitidoId` — o servidor redireciona o lançamento para a conta do
+// cartão, que é onde a dívida mora, sem que isso apareça na tela.
 // =============================================================================
 
 const SITUACOES = [
@@ -65,16 +73,19 @@ export default function Lancamentos() {
   const { dados, carregando, erro, recarregar } = useCarregar(buscar)
 
   // Os seletores precisam de contas e categorias ativas. Carregados uma vez.
-  const [apoio, setApoio] = useState({ contas: [], categorias: [] })
+  const [apoio, setApoio] = useState({ contas: [], categorias: [], cartoes: [] })
   useEffect(() => {
-    Promise.all([apiContas.listar(false), apiCategorias.listar(false)]).then(
-      ([respostaContas, respostaCategorias]) => {
-        setApoio({
-          contas: respostaContas.ok ? respostaContas.corpo.contas : [],
-          categorias: respostaCategorias.ok ? respostaCategorias.corpo.categorias : [],
-        })
-      },
-    )
+    Promise.all([
+      apiContas.listar(false),
+      apiCategorias.listar(false),
+      apiCartoes.listar(false),
+    ]).then(([respostaContas, respostaCategorias, respostaCartoes]) => {
+      setApoio({
+        contas: respostaContas.ok ? respostaContas.corpo.contas : [],
+        categorias: respostaCategorias.ok ? respostaCategorias.corpo.categorias : [],
+        cartoes: respostaCartoes.ok ? respostaCartoes.corpo.cartoes : [],
+      })
+    })
   }, [])
 
   async function executar(acao, mensagemDeSucesso) {
@@ -257,9 +268,19 @@ export default function Lancamentos() {
                   </td>
                   <td>{l.conta?.nome}</td>
                   <td>
-                    {l.formaPagamento
-                      ? rotuloDaForma(formasConhecidas, l.formaPagamento)
-                      : <span className="texto-fraco">—</span>}
+                    {l.cartao
+                      ? `${l.cartao.tipo === 'FISICO' ? 'físico' : 'virtual'} ····${l.cartao.finalDoCartao}`
+                      : l.formaPagamento
+                        ? rotuloDaForma(formasConhecidas, l.formaPagamento)
+                        : <span className="texto-fraco">—</span>}
+                    {l.parcelaTotal && (
+                      <span
+                        className="etiqueta etiqueta-fraca"
+                        title="Uma parcela de uma compra parcelada no cartão"
+                      >
+                        {l.parcelaNumero}/{l.parcelaTotal}
+                      </span>
+                    )}
                     {l.lancamentoParId && (
                       <span
                         className="etiqueta etiqueta-fraca"
@@ -341,7 +362,16 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
   // A conta virou estado controlado por causa da forma de pagamento: as opções
   // de forma são as da conta escolhida, então trocar de conta precisa reagir.
   const [contaId, setContaId] = useState(lancamento?.conta?.id ?? '')
-  const [formaPagamento, setFormaPagamento] = useState(lancamento?.formaPagamento ?? '')
+  // Uma escolha só para "como foi pago": forma OU cartão. São coisas
+  // diferentes por baixo, mas a pergunta é uma — e perguntar duas vezes seria
+  // pedir a mesma informação duas vezes.
+  const [pagamento, setPagamento] = useState(
+    lancamento?.cartao
+      ? `cartao:${lancamento.cartao.id}`
+      : lancamento?.formaPagamento
+        ? `forma:${lancamento.formaPagamento}`
+        : '',
+  )
 
   const categoria = apoio.categorias.find((c) => c.id === categoriaId)
 
@@ -361,6 +391,20 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
   // fazer é pior do que não prometer nada.
   const [tipo, setTipo] = useState(lancamento?.tipo ?? 'SAIDA')
 
+  // Parcelamento só existe em cartão (V12): numa conta comum o dinheiro sai de
+  // uma vez, e se ele sai em partes são lançamentos diferentes.
+  const [parcelas, setParcelas] = useState(1)
+
+  const escolha = pagamento.startsWith('cartao:')
+    ? { forma: null, cartao: pagamento.slice(7) }
+    : pagamento.startsWith('forma:')
+      ? { forma: pagamento.slice(6), cartao: null }
+      : { forma: null, cartao: null }
+
+  // Parcelamento só existe com cartão: numa conta comum o dinheiro sai de uma
+  // vez, e se sai em partes são lançamentos diferentes.
+  const ehCartao = escolha.cartao !== null
+
   const conta = apoio.contas.find((c) => c.id === contaId)
 
   // Espelha resolverFormaDePagamento do servidor. É a única duplicação de regra
@@ -372,11 +416,15 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
   // O cruzamento: as formas que a conta aceita E que servem a este sentido.
   // Sem o segundo filtro, a conta corrente ofereceria "boleto" ao lançar o
   // salário — e o servidor recusaria, com razão.
-  const formasDisponiveis = formasDaContaNoSentido(
-    formasConhecidas,
-    conta?.formasPagamento ?? [],
-    sentido,
-  )
+  const opcoes = opcoesDePagamento(conta, formasConhecidas, apoio.cartoes ?? [], sentido)
+
+  // Tem cartão naquele banco, mas nenhum plástico emitido — o combo ficaria sem
+  // a opção e sem motivo aparente.
+  const ehSaidaSemCartaoUsavel =
+    sentido === 'SAIDA' &&
+    (apoio.cartoes ?? []).some(
+      (c) => c.banco?.id === contaId && !c.encerradoEm && (c.emitidos ?? []).length === 0,
+    )
 
   const assumida =
     categoria && !categoria.sistemica
@@ -392,10 +440,10 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
     // A forma escolhida pertencia à conta anterior e pode não existir na nova —
     // o servidor recusaria. Mesma lógica de zerar a subcategoria ao trocar de
     // categoria: manter o valor antigo seria mandar algo inválido de propósito.
-    const nova = apoio.contas.find((c) => c.id === novoId)
-    setFormaPagamento(
-      (nova?.formasPagamento ?? []).includes(formaPagamento) ? formaPagamento : '',
-    )
+    // A escolha de pagamento pertencia à conta anterior — forma ou cartão, os
+    // dois deixam de valer. Manter seria mandar algo inválido de propósito.
+    setPagamento('')
+    setParcelas(1)
   }
 
   // A situação que o servidor vai derivar. Mostrada, nunca enviada na criação.
@@ -423,11 +471,13 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
           descricao: d.get('descricao').trim(),
           // Vazio significa coisas diferentes nos dois verbos, e é o servidor
           // quem decide: no POST cai na forma padrão da conta, no PUT limpa.
-          formaPagamento: formaPagamento || null,
+          formaPagamento: escolha.forma,
+          cartaoEmitidoId: escolha.cartao,
         }
         const competencia = d.get('dataCompetencia')
         if (competencia) corpo.dataCompetencia = competencia
         if (exigeTipo) corpo.tipo = tipo
+        if (ehCartao && !edicao && parcelas > 1) corpo.parcelas = parcelas
         // Corrigir a situação é legítimo na edição — só ali o campo é enviado.
         if (edicao) corpo.situacao = d.get('situacao')
         aoGravar(corpo)
@@ -514,24 +564,38 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
           </label>
         )}
 
+        {ehCartao && !edicao && (
+          <label>
+            Parcelas
+            <input
+              type="number" min={1} max={99}
+              value={parcelas}
+              onChange={(e) => setParcelas(Number(e.target.value) || 1)}
+            />
+          </label>
+        )}
+
         <label>
           {sentido === 'ENTRADA' ? 'Como entrou' : 'Como foi pago'}
           <select
-            value={formaPagamento}
-            disabled={formasDisponiveis.length === 0}
-            onChange={(e) => setFormaPagamento(e.target.value)}
+            value={pagamento}
+            disabled={opcoes.length === 0}
+            onChange={(e) => {
+              setPagamento(e.target.value)
+              if (!e.target.value.startsWith('cartao:')) setParcelas(1)
+            }}
           >
             <option value="">
-              {formasDisponiveis.length === 0 ? '(nenhuma disponível)' : '(não informar)'}
+              {opcoes.length === 0 ? '(nenhuma disponível)' : '(não informar)'}
             </option>
-            {formasDisponiveis.map((f) => (
-              <option key={f.valor} value={f.valor}>{f.nome}</option>
+            {opcoes.map((o) => (
+              <option key={o.chave} value={o.chave}>{o.rotulo}</option>
             ))}
           </select>
         </label>
       </div>
 
-      {contaId && sentido && formasDisponiveis.length === 0 && (
+      {contaId && sentido && opcoes.length === 0 && (
         <p className="dica">
           {(conta?.formasPagamento ?? []).length === 0 ? (
             <>
@@ -543,13 +607,41 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
             <>
               Nenhuma das formas de <strong>{conta?.nome}</strong> serve para{' '}
               {sentido === 'ENTRADA' ? 'entrada' : 'saída'}. Ajuste a lista dela
-              na tela de <strong>Contas</strong>.
+              na tela de <strong>Contas bancárias</strong>.
             </>
           )}
         </p>
       )}
 
-      {!edicao && !formaPagamento && assumida && (
+      {/* Cartão existe mas nenhum plástico foi emitido: o combo fica sem a
+          opção e sem explicação. Contratos criados antes de B-D63 nasceram
+          assim, e sem este aviso o sintoma seria "sumiu o cartão". */}
+      {ehSaidaSemCartaoUsavel && (
+        <p className="dica">
+          <strong>{conta?.nome}</strong> tem cartão de crédito, mas nenhum
+          cartão emitido ainda. Crie um físico ou virtual na tela de{' '}
+          <strong>Cartões</strong> para ele aparecer aqui.
+        </p>
+      )}
+
+      {ehCartao && !edicao && parcelas > 1 && (
+        <p className="dica">
+          Serão criados <strong>{parcelas} lançamentos</strong>, um por fatura. A
+          data da compra se repete em todos — o que muda é a fatura que cobra
+          cada um. O resíduo dos centavos vai na primeira parcela.
+        </p>
+      )}
+
+      {ehCartao && !edicao && (
+        <p className="dica">
+          Esta é uma conta de <strong>cartão de crédito</strong>: a compra cai na
+          fatura aberta, e a data de caixa vira o <strong>vencimento</strong>{' '}
+          dela. É por isso que ela aparece no mapa no mês em que você paga, e não
+          no mês em que comprou.
+        </p>
+      )}
+
+      {!edicao && !pagamento && assumida && (
         <p className="dica">
           Sem escolher, este lançamento será gravado como{' '}
           <strong>{rotuloDaForma(formasConhecidas, assumida)}</strong>, que é o
