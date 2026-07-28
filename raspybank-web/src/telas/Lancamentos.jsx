@@ -4,10 +4,16 @@ import {
   categorias as apiCategorias,
   contas as apiContas,
   lancamentos as apiLancamentos,
+  transferencias as apiTransferencias,
 } from '../api/recursos.js'
 import Aviso from '../componentes/Aviso.jsx'
 import { useCarregar } from '../ganchos/useCarregar.js'
 import { data, dinheiro, hojeISO, mesDe, mesPorExtenso } from '../util/formato.js'
+import {
+  carregarFormasDePagamento,
+  formasDaContaNoSentido,
+  rotuloDaForma,
+} from '../util/formasPagamento.js'
 
 // =============================================================================
 // T-08 — Lançamentos
@@ -22,6 +28,15 @@ import { data, dinheiro, hojeISO, mesDe, mesPorExtenso } from '../util/formato.j
 //
 // Reimplementar essas regras aqui criaria uma segunda fonte da verdade, e a
 // segunda é sempre a que fica desatualizada.
+//
+// A FORMA DE PAGAMENTO (V11) segue a mesma disciplina. As opções são o
+// cruzamento de DUAS listas que vêm do servidor: as formas que aquela conta
+// aceita, e as que servem ao sentido do lançamento. A tela não decide nenhuma
+// das duas — só mostra, para a pessoa ver o que vai ser gravado antes de gravar.
+//
+// TRANSFERÊNCIA é o único caminho desta tela que NÃO cria um lançamento: cria
+// dois, ligados, numa transação só. A primeira perna sozinha já seria um saldo
+// errado, e é por isso que ela tem endpoint próprio em vez de dois POSTs.
 // =============================================================================
 
 const SITUACOES = [
@@ -36,6 +51,12 @@ export default function Lancamentos() {
   const [aviso, setAviso] = useState(null)
   const [ocupado, setOcupado] = useState(false)
   const [editando, setEditando] = useState(null) // lançamento inteiro, ou 'novo'
+  const [transferindo, setTransferindo] = useState(false)
+
+  const [formasConhecidas, setFormasConhecidas] = useState([])
+  useEffect(() => {
+    carregarFormasDePagamento().then(setFormasConhecidas)
+  }, [])
 
   const buscar = useCallback(
     () => apiLancamentos.listar({ mes, ...filtros }),
@@ -131,12 +152,41 @@ export default function Lancamentos() {
         >
           Novo lançamento
         </button>
+
+        <button
+          type="button" className="botao-texto"
+          onClick={() => setTransferindo(true)}
+          disabled={apoio.contas.length < 2}
+          title={
+            apoio.contas.length < 2
+              ? 'Transferência precisa de duas contas: uma de origem e uma de destino.'
+              : undefined
+          }
+        >
+          Transferir
+        </button>
       </div>
+
+      {transferindo && (
+        <FormularioDeTransferencia
+          contas={apoio.contas}
+          ocupado={ocupado}
+          aoCancelar={() => setTransferindo(false)}
+          aoGravar={async (corpo) => {
+            const deu = await executar(
+              () => apiTransferencias.criar(corpo),
+              'Transferência registrada nas duas contas.',
+            )
+            if (deu) setTransferindo(false)
+          }}
+        />
+      )}
 
       {editando && (
         <FormularioDeLancamento
           lancamento={editando === 'novo' ? null : editando}
           apoio={apoio}
+          formasConhecidas={formasConhecidas}
           ocupado={ocupado}
           aoCancelar={() => setEditando(null)}
           aoGravar={async (corpo) => {
@@ -166,7 +216,7 @@ export default function Lancamentos() {
             <thead>
               <tr>
                 <th>Data</th><th>Descrição</th><th>Categoria</th><th>Conta</th>
-                <th className="numerico">Valor</th><th />
+                <th>Pago com</th><th className="numerico">Valor</th><th />
               </tr>
             </thead>
             <tbody>
@@ -188,6 +238,19 @@ export default function Lancamentos() {
                     )}
                   </td>
                   <td>{l.conta?.nome}</td>
+                  <td>
+                    {l.formaPagamento
+                      ? rotuloDaForma(formasConhecidas, l.formaPagamento)
+                      : <span className="texto-fraco">—</span>}
+                    {l.lancamentoParId && (
+                      <span
+                        className="etiqueta etiqueta-fraca"
+                        title="Uma das duas pernas de uma transferência. Excluir esta exclui a outra."
+                      >
+                        transferência
+                      </span>
+                    )}
+                  </td>
                   <td className={`numerico ${l.tipo === 'ENTRADA' ? 'entrada' : 'saida'}`}>
                     {l.tipo === 'ENTRADA' ? '+' : '−'} {dinheiro(l.valor)}
                   </td>
@@ -250,16 +313,63 @@ function somar(lista) {
 
 // ----------------------------------------------------------------------------
 
-function FormularioDeLancamento({ lancamento, apoio, ocupado, aoGravar, aoCancelar }) {
+function FormularioDeLancamento({ lancamento, apoio, formasConhecidas, ocupado, aoGravar, aoCancelar }) {
   const edicao = Boolean(lancamento)
 
   const [categoriaId, setCategoriaId] = useState(lancamento?.categoria?.id ?? '')
   const [subcategoriaId, setSubcategoriaId] = useState(lancamento?.subcategoria?.id ?? '')
   const [dataCaixa, setDataCaixa] = useState(lancamento?.dataCaixa ?? hojeISO())
 
+  // A conta virou estado controlado por causa da forma de pagamento: as opções
+  // de forma são as da conta escolhida, então trocar de conta precisa reagir.
+  const [contaId, setContaId] = useState(lancamento?.conta?.id ?? '')
+  const [formaPagamento, setFormaPagamento] = useState(lancamento?.formaPagamento ?? '')
+
   const categoria = apoio.categorias.find((c) => c.id === categoriaId)
   const subcategoriasDisponiveis = (categoria?.subcategorias ?? []).filter((s) => !s.arquivadaEm)
   const exigeTipo = categoria?.tipo === 'AMBOS'
+
+  // Controlado só porque a dica da forma padrão precisa saber o sentido: o
+  // servidor não assume forma para ENTRADA, e prometer na tela o que ele não vai
+  // fazer é pior do que não prometer nada.
+  const [tipo, setTipo] = useState(lancamento?.tipo ?? 'SAIDA')
+
+  const conta = apoio.contas.find((c) => c.id === contaId)
+
+  // Espelha resolverFormaDePagamento do servidor. É a única duplicação de regra
+  // desta tela, e ela existe para MOSTRAR, não para decidir: o que for gravado
+  // continua sendo o que o servidor resolver. Se as duas divergirem, o defeito
+  // é uma dica errada — não um dado errado.
+  const sentido = exigeTipo ? tipo : categoria?.tipo
+
+  // O cruzamento: as formas que a conta aceita E que servem a este sentido.
+  // Sem o segundo filtro, a conta corrente ofereceria "boleto" ao lançar o
+  // salário — e o servidor recusaria, com razão.
+  const formasDisponiveis = formasDaContaNoSentido(
+    formasConhecidas,
+    conta?.formasPagamento ?? [],
+    sentido,
+  )
+
+  const assumida =
+    categoria && !categoria.sistemica
+      ? sentido === 'SAIDA'
+        ? conta?.padraoSaida
+        : sentido === 'ENTRADA'
+          ? conta?.padraoEntrada
+          : null
+      : null
+
+  function trocarConta(novoId) {
+    setContaId(novoId)
+    // A forma escolhida pertencia à conta anterior e pode não existir na nova —
+    // o servidor recusaria. Mesma lógica de zerar a subcategoria ao trocar de
+    // categoria: manter o valor antigo seria mandar algo inválido de propósito.
+    const nova = apoio.contas.find((c) => c.id === novoId)
+    setFormaPagamento(
+      (nova?.formasPagamento ?? []).includes(formaPagamento) ? formaPagamento : '',
+    )
+  }
 
   // A situação que o servidor vai derivar. Mostrada, nunca enviada na criação.
   const situacaoPrevista = dataCaixa > hojeISO() ? 'PREVISTO' : 'REALIZADO'
@@ -278,16 +388,19 @@ function FormularioDeLancamento({ lancamento, apoio, ocupado, aoGravar, aoCancel
         e.preventDefault()
         const d = new FormData(e.target)
         const corpo = {
-          contaId: d.get('contaId'),
+          contaId,
           categoriaId,
           subcategoriaId: subcategoriaId || null,
           valor: d.get('valor').trim(),
           dataCaixa,
           descricao: d.get('descricao').trim(),
+          // Vazio significa coisas diferentes nos dois verbos, e é o servidor
+          // quem decide: no POST cai na forma padrão da conta, no PUT limpa.
+          formaPagamento: formaPagamento || null,
         }
         const competencia = d.get('dataCompetencia')
         if (competencia) corpo.dataCompetencia = competencia
-        if (exigeTipo) corpo.tipo = d.get('tipo')
+        if (exigeTipo) corpo.tipo = tipo
         // Corrigir a situação é legítimo na edição — só ali o campo é enviado.
         if (edicao) corpo.situacao = d.get('situacao')
         aoGravar(corpo)
@@ -298,7 +411,10 @@ function FormularioDeLancamento({ lancamento, apoio, ocupado, aoGravar, aoCancel
       <div className="campos-lado-a-lado">
         <label>
           Conta
-          <select name="contaId" defaultValue={lancamento?.conta?.id ?? ''} required>
+          <select
+            value={contaId} required
+            onChange={(e) => trocarConta(e.target.value)}
+          >
             <option value="" disabled>Escolha…</option>
             {apoio.contas.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
@@ -354,7 +470,7 @@ function FormularioDeLancamento({ lancamento, apoio, ocupado, aoGravar, aoCancel
         {exigeTipo && (
           <label>
             Tipo
-            <select name="tipo" defaultValue={lancamento?.tipo ?? 'SAIDA'} required>
+            <select value={tipo} onChange={(e) => setTipo(e.target.value)} required>
               <option value="SAIDA">Saída</option>
               <option value="ENTRADA">Entrada</option>
             </select>
@@ -370,7 +486,50 @@ function FormularioDeLancamento({ lancamento, apoio, ocupado, aoGravar, aoCancel
             </select>
           </label>
         )}
+
+        <label>
+          {sentido === 'ENTRADA' ? 'Como entrou' : 'Como foi pago'}
+          <select
+            value={formaPagamento}
+            disabled={formasDisponiveis.length === 0}
+            onChange={(e) => setFormaPagamento(e.target.value)}
+          >
+            <option value="">
+              {formasDisponiveis.length === 0 ? '(nenhuma disponível)' : '(não informar)'}
+            </option>
+            {formasDisponiveis.map((f) => (
+              <option key={f.valor} value={f.valor}>{f.nome}</option>
+            ))}
+          </select>
+        </label>
       </div>
+
+      {contaId && sentido && formasDisponiveis.length === 0 && (
+        <p className="dica">
+          {(conta?.formasPagamento ?? []).length === 0 ? (
+            <>
+              A conta <strong>{conta?.nome}</strong> não tem formas de pagamento
+              cadastradas. Cadastre-as na tela de <strong>Contas</strong> para
+              poder registrar como o dinheiro se moveu.
+            </>
+          ) : (
+            <>
+              Nenhuma das formas de <strong>{conta?.nome}</strong> serve para{' '}
+              {sentido === 'ENTRADA' ? 'entrada' : 'saída'}. Ajuste a lista dela
+              na tela de <strong>Contas</strong>.
+            </>
+          )}
+        </p>
+      )}
+
+      {!edicao && !formaPagamento && assumida && (
+        <p className="dica">
+          Sem escolher, este lançamento será gravado como{' '}
+          <strong>{rotuloDaForma(formasConhecidas, assumida)}</strong>, que é o
+          padrão de {sentido === 'ENTRADA' ? 'entradas' : 'saídas'} da conta{' '}
+          <strong>{conta?.nome}</strong>.
+        </p>
+      )}
 
       <label className="campo-largo">
         Descrição
@@ -395,6 +554,130 @@ function FormularioDeLancamento({ lancamento, apoio, ocupado, aoGravar, aoCancel
       <div className="acoes-linha">
         <button type="submit" className="botao-principal botao-pequeno" disabled={ocupado}>
           {edicao ? 'Salvar' : 'Registrar'}
+        </button>
+        <button type="button" className="botao-texto" onClick={aoCancelar}>Cancelar</button>
+      </div>
+    </form>
+  )
+}
+
+/**
+ * Transferência entre contas próprias — os dois lançamentos ligados de F2.
+ *
+ * O formulário é curto de propósito, e cada ausência é decisão do servidor:
+ * não há categoria (é sempre a sistêmica Transferência), não há tipo (origem é
+ * saída, destino é entrada) e não há forma de pagamento (categoria sistêmica
+ * não recebe padrão — o dinheiro não se moveu por pix nem boleto, só trocou de
+ * lugar). Quem quiser registrar "transferi por pix" edita a perna depois.
+ */
+function FormularioDeTransferencia({ contas, ocupado, aoGravar, aoCancelar }) {
+  const [origemId, setOrigemId] = useState('')
+  const [destinoId, setDestinoId] = useState('')
+  const [dataCaixa, setDataCaixa] = useState(hojeISO())
+
+  const origem = contas.find((c) => c.id === origemId)
+  const destino = contas.find((c) => c.id === destinoId)
+
+  // A mesma conta dos dois lados não move dinheiro nenhum. O servidor recusa
+  // com 403; tirar a opção da lista evita a viagem e o erro.
+  const destinosPossiveis = contas.filter((c) => c.id !== origemId)
+
+  function trocarOrigem(novoId) {
+    setOrigemId(novoId)
+    if (novoId === destinoId) setDestinoId('')
+  }
+
+  return (
+    <form
+      className="formulario-bloco"
+      onSubmit={(e) => {
+        e.preventDefault()
+        const d = new FormData(e.target)
+        aoGravar({
+          contaOrigemId: origemId,
+          contaDestinoId: destinoId,
+          valor: d.get('valor').trim(),
+          dataCaixa,
+          descricao: d.get('descricao').trim(),
+        })
+      }}
+    >
+      <h3>Transferir entre contas</h3>
+
+      <div className="campos-lado-a-lado">
+        <label>
+          De
+          <select value={origemId} required onChange={(e) => trocarOrigem(e.target.value)}>
+            <option value="" disabled>Escolha…</option>
+            {contas.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nome} — {dinheiro(c.saldo)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          Para
+          <select
+            value={destinoId} required
+            disabled={!origemId}
+            onChange={(e) => setDestinoId(e.target.value)}
+          >
+            <option value="" disabled>Escolha…</option>
+            {destinosPossiveis.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nome} — {dinheiro(c.saldo)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="campos-lado-a-lado">
+        <label>
+          Valor
+          <input name="valor" inputMode="decimal" required placeholder="0,00" />
+        </label>
+
+        <label>
+          Data de caixa
+          <input
+            type="date" name="dataCaixa" required
+            value={dataCaixa} onChange={(e) => setDataCaixa(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <label className="campo-largo">
+        Descrição
+        <input
+          name="descricao" maxLength={120}
+          placeholder={
+            origem && destino
+              ? `opcional — sem ela: "Transferência para ${destino.nome}"`
+              : 'opcional'
+          }
+        />
+      </label>
+
+      <p className="dica">
+        Isto cria <strong>dois</strong> lançamentos ligados: uma saída em{' '}
+        {origem ? <strong>{origem.nome}</strong> : 'uma conta'} e uma entrada em{' '}
+        {destino ? <strong>{destino.nome}</strong> : 'outra'}, ambos na categoria
+        Transferência. O patrimônio total não muda — o dinheiro só troca de
+        lugar, e por isso transferência não aparece no mapa de gastos.
+      </p>
+
+      <p className="dica">
+        Sacar dinheiro é isto: transferir da conta para a carteira. Não existe
+        lançamento de "saque" separado, porque seria um segundo nome para o
+        mesmo evento.
+      </p>
+
+      <div className="acoes-linha">
+        <button type="submit" className="botao-principal botao-pequeno" disabled={ocupado}>
+          Transferir
         </button>
         <button type="button" className="botao-texto" onClick={aoCancelar}>Cancelar</button>
       </div>

@@ -2,6 +2,7 @@ package com.raspybank.app.web;
 
 import com.raspybank.lancamento.dominio.Categoria;
 import com.raspybank.lancamento.dominio.Conta;
+import com.raspybank.lancamento.dominio.FormaPagamento;
 import com.raspybank.lancamento.dominio.Lancamento;
 import com.raspybank.lancamento.dominio.SituacaoLancamento;
 import com.raspybank.lancamento.dominio.Subcategoria;
@@ -166,13 +167,20 @@ public class LancamentoControlador {
         UUID responsavelId,
 
         /** Aceito so no PUT; no POST a situacao deriva da data (B-D9). */
-        SituacaoLancamento situacao
+        SituacaoLancamento situacao,
+
+        /**
+         * Como foi pago (V11). Opcional, e o vazio significa coisas diferentes
+         * nos dois verbos: no POST cai na forma padrao da conta, no PUT limpa o
+         * campo. Ver {@code LancamentoServico.resolverFormaDePagamento}.
+         */
+        FormaPagamento formaPagamento
     ) {
         LancamentoServico.Dados paraDados() {
             return new LancamentoServico.Dados(
                 contaId, categoriaId, subcategoriaId, tipo,
                 new BigDecimal(valor), dataCaixa, dataCompetencia,
-                descricao, observacao, responsavelId, situacao);
+                descricao, observacao, responsavelId, situacao, formaPagamento);
         }
     }
 
@@ -195,6 +203,18 @@ public class LancamentoControlador {
         Referencia categoria,
         Referencia subcategoria,
         UUID responsavelId,
+
+        /** Nulo e resposta legitima: "nao sei" e diferente de um palpite. */
+        FormaPagamento formaPagamento,
+
+        /**
+         * A outra perna, quando este lancamento faz parte de uma transferencia
+         * (F2). A tela usa isto para avisar que excluir um exclui os dois — o
+         * que o banco faz por {@code ON DELETE CASCADE}, e que seria uma
+         * surpresa desagradavel sem aviso.
+         */
+        UUID lancamentoParId,
+
         OffsetDateTime criadoEm
     ) {
         static LancamentoResposta de(LancamentoServico.Item item) {
@@ -207,7 +227,8 @@ public class LancamentoControlador {
                 referencia(item.conta()),
                 referencia(item.categoria()),
                 referencia(item.subcategoria()),
-                l.getResponsavelId(), l.getCriadoEm());
+                l.getResponsavelId(), l.getFormaPagamento(),
+                l.getLancamentoParId(), l.getCriadoEm());
         }
 
         private static Referencia referencia(Conta c) {

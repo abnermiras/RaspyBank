@@ -573,3 +573,45 @@ code {
 .tabela-mapa td.numerico { line-height: 1.25; }
 .valor-previsto { display: block; font-size: .68rem; color: var(--previsto); }
 .tabela-mapa td.vazia { color: var(--borda); }
+
+/* ---------------------------------------------------------------------------
+   Formas de pagamento (V11)
+   --------------------------------------------------------------------------- */
+
+/* As seis caixas em grade, e não empilhadas: a lista é curta e fechada, então
+   ver todas de uma vez é o que permite decidir sem rolar. */
+.grade-formas {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: .35rem 1rem;
+    border: 1px solid var(--borda);
+    border-radius: 6px;
+    padding: .6rem .8rem;
+    margin: 0;
+}
+
+.grade-formas legend {
+    padding: 0 .35rem;
+    font-size: .78rem;
+    color: var(--texto-fraco);
+}
+
+.grade-formas .alternador { margin: 0; }
+
+/* Na linha da conta, as etiquetas ficam abaixo do nome e não ao lado: com seis
+   formas marcadas elas empurrariam o saldo para fora da tela. */
+.formas-da-conta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem .4rem;
+    flex-basis: 100%;
+    font-size: .7rem;
+}
+
+/* A padrão precisa se distinguir das outras — senão a informação mais
+   importante da lista é a única que não aparece. */
+.etiqueta-padrao {
+    color: var(--texto);
+    font-weight: 600;
+    border-bottom: 1px dotted currentColor;
+}

@@ -114,7 +114,10 @@ Query opcional: `?incluirEncerradas=true` (padrão `false`).
       "id": "0198...", "nome": "Conta conjunta", "natureza": "ATIVO",
       "encerradaEm": null,
       "saldo": "1250.00", "saldoComPrevistos": "980.00",
-      "ambientes": [ { "id": "0198...", "nome": "Casa" } ]
+      "ambientes": [ { "id": "0198...", "nome": "Casa" } ],
+      "formasPagamento": ["DEBITO", "PIX", "BOLETO", "CREDITO_EM_CONTA"],
+      "padraoSaida": "DEBITO",
+      "padraoEntrada": "CREDITO_EM_CONTA"
     }
   ]
 }
@@ -128,7 +131,11 @@ Query opcional: `?incluirEncerradas=true` (padrão `false`).
 
 ### `POST /api/contas`
 ```json
-{ "nome": "Poupança", "natureza": "ATIVO", "saldoInicial": "3000.00" }
+{
+  "nome": "Poupança", "natureza": "ATIVO", "saldoInicial": "3000.00",
+  "formasPagamento": ["DEBITO", "PIX", "CREDITO_EM_CONTA"],
+  "padraoSaida": "DEBITO", "padraoEntrada": "CREDITO_EM_CONTA"
+}
 ```
 `saldoInicial` é **opcional e não é campo da conta**: quando presente, o servidor cria um lançamento na categoria sistêmica `AJUSTE` (A13/B-D13). A tela deixa isso visível em vez de fingir que existe um campo mágico — o saldo continua sendo só a soma dos lançamentos.
 
@@ -141,14 +148,53 @@ Conta não se exclui, se encerra (F7). Encerrada, some dos seletores e mantém o
 
 As escritas respondem na **mesma forma** do `GET`, com saldo e vínculos recalculados. Devolver uma forma reduzida obrigaria a tela a ter dois caminhos de leitura para o mesmo objeto, e o segundo é sempre o que fica desatualizado.
 
+### `PUT /api/contas/{id}/formas-pagamento`
+```json
+{
+  "formas": ["DEBITO", "PIX", "BOLETO", "CREDITO_EM_CONTA"],
+  "padraoSaida": "PIX", "padraoEntrada": "CREDITO_EM_CONTA"
+}
+```
+Substitui a lista **inteira**, não acrescenta — a tela mostra as caixas com as marcadas, então o que ela envia já é o estado desejado. `formas: []` deixa a conta sem nenhuma; padrão `null` é válido (aceitar várias sem ter preferência).
+
+**Dois padrões, um por sentido** (B-D31). Entrada também tem "como o dinheiro se moveu": o salário é *creditado*. Cada padrão precisa estar em `formas` **e** aceitar o sentido correspondente — `padraoSaida: "CREDITO_EM_CONTA"` responde **403**, porque não se paga gasolina com crédito em conta.
+
+Endpoint próprio e não um campo no `PUT /{id}` porque os riscos são diferentes: renomear nunca falha, mexer na lista pode ser recusado — e juntar os dois faria uma recusa dessas impedir também a troca de nome, que não tinha nada a ver.
+
+### `GET /api/formas-pagamento`
+O vocabulário, com os sentidos que cada forma aceita. Somente leitura, e não haverá escrita: a lista é fixa (B-D30) — forma nova é uma migração, não um cadastro.
+
+```json
+{
+  "formasPagamento": [
+    { "valor": "DEBITO", "nome": "Débito", "sentidos": ["SAIDA"] },
+    { "valor": "PIX", "nome": "Pix", "sentidos": ["ENTRADA", "SAIDA"] },
+    { "valor": "CREDITO_EM_CONTA", "nome": "Crédito em conta", "sentidos": ["ENTRADA"] }
+  ]
+}
+```
+
+**Existe para o frontend não reescrever a regra.** Ela já vive em dois lugares por necessidade — as onze linhas de `forma_pagamento_sentido`, que o banco impõe, e o enum Java, que produz a mensagem de erro. Uma terceira cópia em JavaScript divergiria na primeira forma nova, e o sintoma seria o seletor oferecendo o que o servidor recusa (B-D33).
+
+Oito valores: `DEBITO`, `PIX`, `CREDITO_EM_CONTA`, `BOLETO`, `DEBITO_AUTOMATICO`, `DINHEIRO`, `TED`, `DESCONTO_EM_FOLHA`.
+
+Duas ausências e dois nomes longos, todos deliberados:
+
+- **Crédito de cartão não está aqui** (B-D36). Compra no cartão nasce na conta do cartão; quem debita a corrente é o pagamento da fatura. É a V12.
+- **`CREDITO_EM_CONTA` e não `CREDITO`** — em português "crédito" significa tanto o cartão quanto "entrou dinheiro", e `DEBITO` na mesma lista já é o cartão.
+- **`TED` e não `TRANSFERENCIA`** (B-D37) — `TRANSFERENCIA` já é o código de uma categoria sistêmica.
+- **Não existe `SAQUE`** (B-D39). Sacar é transferir da conta para a carteira; um segundo nome para o mesmo evento obrigaria todo relatório futuro a conhecer os dois.
+
+> **409 ao remover forma em uso.** Tirar `BOLETO` de uma conta que tem lançamentos com boleto é recusado, e a mensagem diz quantos. A alternativa apagaria em silêncio exatamente a informação que o campo veio registrar (B-D33).
+
 ### Códigos de erro desta seção
 
 | Código | Quando |
 |---|---|
-| `400` | `nome` vazio, `natureza` fora de `ATIVO`/`PASSIVO`, `saldoInicial` malformado |
-| `403` | Sessão sem ambiente ativo |
+| `400` | `nome` vazio, `natureza` fora de `ATIVO`/`PASSIVO`, `saldoInicial` malformado, `formas` ausente no `PUT` de formas |
+| `403` | Sessão sem ambiente ativo; `formaPadrao` fora de `formasPagamento` |
 | `404` | Id inexistente ou de conta não vinculada ao ambiente ativo (B-D21) |
-| `409` | Encerrar conta com saldo diferente de zero |
+| `409` | Encerrar conta com saldo diferente de zero; remover forma que algum lançamento usa |
 
 ---
 
@@ -167,6 +213,8 @@ Filtro obrigatório por mês (sobre `dataCaixa`). Opcionais: `contaId`, `categor
       "conta": { "id": "0198...", "nome": "Conta conjunta" },
       "categoria": { "id": "0198...", "nome": "Mercado" },
       "subcategoria": null,
+      "formaPagamento": "DEBITO",
+      "lancamentoParId": null,
       "criadoEm": "2026-07-12T19:04:11-03:00"
     }
   ]
@@ -179,11 +227,12 @@ Categoria e subcategoria viajam como objeto `{id, nome}` resolvido na hora — n
 ```json
 {
   "contaId": "0198...", "categoriaId": "0198...", "subcategoriaId": null,
-  "valor": "380.00", "dataCaixa": "2026-07-12", "descricao": "Mercado do mês"
+  "valor": "380.00", "dataCaixa": "2026-07-12", "descricao": "Mercado do mês",
+  "formaPagamento": "PIX"
 }
 ```
 
-Seis campos, e três ausências que são decisão, não esquecimento:
+Sete campos, e três ausências que são decisão, não esquecimento:
 
 - **sem `ambienteId`** — vem da sessão (B-D2);
 - **sem `situacao`** — deriva de `dataCaixa`: passado ou hoje → `REALIZADO`, futuro → `PREVISTO` (B-D9 / R9);
@@ -191,8 +240,23 @@ Seis campos, e três ausências que são decisão, não esquecimento:
 
 `dataCompetencia` é opcional e, ausente, copia `dataCaixa` (F14). **403** se a conta não pertencer ao ambiente ativo — a restrição de B-D2 é conferida no banco, e o 403 é a tradução dela.
 
+#### `formaPagamento` — opcional, e passa por DUAS perguntas
+
+Quando **informada**, ela precisa passar nas duas, e elas são diferentes:
+
+1. **A conta aceita esta forma?** Senão **403**, dizendo quais aceita. Garantida por `(conta_id, forma_pagamento) → conta_forma_pagamento`.
+2. **Esta forma serve a este sentido?** Senão **403**. Garantida por `(forma_pagamento, tipo) → forma_pagamento_sentido`. É esta que impede "salário pago no boleto" numa conta que aceita as duas formas.
+
+Quando **ausente**, o servidor assume o padrão da conta **para aquele sentido** — `padraoSaida` num gasto, `padraoEntrada` numa receita — e só se a categoria não for sistêmica (B-D32).
+
+A guarda de sistêmica não é detalhe: sem ela o saldo de abertura de toda conta nova apareceria no extrato como "pago no débito", que ninguém digitou. E é ela também que faz as duas pernas de uma transferência nascerem sem forma, **sem nenhum caso especial no código**.
+
+`formaPagamento` é **dimensão de análise** (B-D30): explica como o dinheiro se moveu e não entra em soma nenhuma. Saldo, situação e mapa de gastos são exatamente o que eram antes dela.
+
 ### `GET /api/lancamentos/{id}` · `PUT /api/lancamentos/{id}` · `DELETE /api/lancamentos/{id}`
 Lançamento é editável e excluível **com auditoria** (F16), e a auditoria é por gatilho lendo o contexto do RLS + o canal (F26 / B-D6). `PUT` aceita `situacao` explícito — a derivação de B-D9 vale na criação; corrigir depois é legítimo e é o que a lista da T-08 oferece. `PUT` é substituição completa: trocar a categoria **zera a subcategoria**, porque ela pertencia à anterior e adivinhar uma equivalente seria inventar dado. `DELETE` responde **204**.
+
+> **`formaPagamento` vazia significa coisas diferentes no `POST` e no `PUT`** (B-D32). No `POST` cai no padrão da conta; no `PUT` **limpa** o campo. Não é inconsistência: no `PUT` a tela mostra o campo já preenchido com o valor atual, então mandar vazio é um ato — a pessoa está limpando, e reaplicar o padrão desfaria no servidor o que ela acabou de fazer.
 
 > `GET /api/lancamentos/{id}` foi acrescentado em 26/07/2026: as escritas respondem na mesma forma da lista, e ler de volta depois de gravar é o único jeito de a tela receber a classificação resolvida sem montá-la por conta própria.
 
@@ -201,10 +265,65 @@ Lançamento é editável e excluível **com auditoria** (F16), e a auditoria é 
 | Código | Quando |
 |---|---|
 | `400` | `valor` negativo ou com mais de duas casas, campo obrigatório ausente, `mes` malformado |
-| `403` | Categoria não aceita o sentido (F12); categoria `AMBOS` sem `tipo`; subcategoria de outra categoria (F11); **conta fora do ambiente ativo** (B-D2) |
+| `403` | Categoria não aceita o sentido (F12); categoria `AMBOS` sem `tipo`; subcategoria de outra categoria (F11); **conta fora do ambiente ativo** (B-D2); `formaPagamento` que a conta não aceita |
 | `404` | Lançamento, categoria ou subcategoria inexistente, ou de outro ambiente seu (B-D21) |
 
 O 403 da conta fora do ambiente é a **tradução da chave composta** `(ambiente_id, conta_id) → conta_ambiente`: o banco recusaria de qualquer forma, mas diria apenas que uma restrição falhou. A frase existe para a tela ter o que mostrar.
+
+---
+
+## 5b. Transferências
+
+### `POST /api/transferencias`
+```json
+{
+  "contaOrigemId": "0198...", "contaDestinoId": "0198...",
+  "valor": "100.00", "dataCaixa": "2026-07-27", "descricao": "Saque no caixa"
+}
+```
+
+Cria **dois** lançamentos ligados (F2) numa transação só, e responde **201** com as duas pernas:
+
+```json
+{
+  "saida":   { "id": "0198a...", "contaId": "...", "valor": "100.00",
+               "situacao": "REALIZADO", "lancamentoParId": "0198b..." },
+  "entrada": { "id": "0198b...", "contaId": "...", "valor": "100.00",
+               "situacao": "REALIZADO", "lancamentoParId": "0198a..." }
+}
+```
+
+**Existe como recurso próprio porque a primeira perna sozinha já é um saldo errado** (B-D40). Dois `POST /api/lancamentos` em sequência deixariam, se o segundo falhasse, 100 reais tendo saído de uma conta sem terem entrado em nenhuma — e nada denunciaria isso depois.
+
+Três ausências no corpo, todas decisão:
+
+- **sem `categoriaId`** — é sempre a sistêmica `TRANSFERENCIA`. Deixar escolher permitiria classificar uma transferência como "Mercado", e o mapa contaria como despesa um dinheiro que só trocou de bolso;
+- **sem `tipo`** — origem é sempre saída, destino sempre entrada;
+- **sem `formaPagamento`** — as duas pernas nascem sem forma, porque categoria sistêmica não recebe padrão. Quem quiser registrar "transferi por pix" edita a perna depois pelo `PUT /api/lancamentos/{id}`.
+
+`descricao` é opcional; ausente, cada perna ganha o nome da **outra** conta.
+
+> **Sacar dinheiro é isto.** Não existe endpoint, categoria nem forma de pagamento chamada "saque" (B-D39): sacar é transferir da conta para a carteira, e o destino ser uma conta de espécie é o que torna a operação um saque. Um segundo nome para o mesmo evento obrigaria todo relatório futuro a conhecer os dois.
+
+### Não existe `GET` nem `DELETE` aqui
+
+Ler transferência é ler lançamento: as duas pernas aparecem no extrato da T-08 como os lançamentos que são, com `lancamentoParId` preenchido. E excluir uma perna **já apaga a outra**, por `ON DELETE CASCADE` (B-D38) — um `DELETE /api/transferencias/{id}` seria um segundo caminho para o mesmo efeito, e segundo caminho é onde as regras divergem.
+
+### O que propaga, e o que não propaga
+
+`PUT /api/lancamentos/{id}` numa perna propaga para a outra o que **precisa** ser igual: valor, data de caixa, competência e situação. Se um lado virasse 100 e o outro continuasse 10, noventa reais apareceriam do nada — em silêncio, porque nenhum saldo isolado pareceria errado.
+
+Não propaga a **conta** nem a **descrição**: a conta é o que distingue as pernas (corrigir "saiu do Nubank, não do Itaú" é de um lado só), e as descrições podem legitimamente diferir.
+
+**403 ao mudar a categoria** de uma perna. Sair de `TRANSFERENCIA` deixaria o par com classificações diferentes em cada lado, e o mapa contaria metade de um movimento que não é gasto (B-D15).
+
+### Códigos de erro desta seção
+
+| Código | Quando |
+|---|---|
+| `400` | `valor` malformado ou com mais de duas casas, campo obrigatório ausente |
+| `403` | Origem igual ao destino; conta encerrada de qualquer um dos lados; sessão sem ambiente ativo |
+| `404` | Conta de origem ou de destino inexistente ou fora do ambiente ativo (B-D25) — a mensagem diz **qual dos dois lados** |
 
 ---
 
@@ -269,4 +388,4 @@ Regras de construção:
 
 ## 7. Fora deste contrato
 
-Cartão, cartão emitido, fatura, parcela e recorrência são **V11**, junto da tela T-06 (B-D1). Quando chegarem, `POST /api/lancamentos` ganha os campos de parcelamento e este documento ganha uma seção — não o contrário.
+Cartão, cartão emitido, fatura, parcela e recorrência são **V12**, junto da tela T-06 (B-D1). Quando chegarem, `POST /api/lancamentos` ganha os campos de parcelamento e este documento ganha uma seção — não o contrário.

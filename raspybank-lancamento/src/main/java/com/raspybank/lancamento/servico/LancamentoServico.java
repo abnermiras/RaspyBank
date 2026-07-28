@@ -3,12 +3,15 @@ package com.raspybank.lancamento.servico;
 import com.raspybank.lancamento.dominio.Categoria;
 import com.raspybank.lancamento.dominio.Conta;
 import com.raspybank.lancamento.dominio.ContaAmbiente;
+import com.raspybank.lancamento.dominio.ContaFormaPagamento;
+import com.raspybank.lancamento.dominio.FormaPagamento;
 import com.raspybank.lancamento.dominio.Lancamento;
 import com.raspybank.lancamento.dominio.SituacaoLancamento;
 import com.raspybank.lancamento.dominio.Subcategoria;
 import com.raspybank.lancamento.dominio.TipoLancamento;
 import com.raspybank.lancamento.repositorio.CategoriaRepositorio;
 import com.raspybank.lancamento.repositorio.ContaAmbienteRepositorio;
+import com.raspybank.lancamento.repositorio.ContaFormaPagamentoRepositorio;
 import com.raspybank.lancamento.repositorio.ContaRepositorio;
 import com.raspybank.lancamento.repositorio.LancamentoRepositorio;
 import com.raspybank.lancamento.repositorio.SubcategoriaRepositorio;
@@ -64,17 +67,20 @@ public class LancamentoServico {
     private final SubcategoriaRepositorio subcategorias;
     private final ContaRepositorio contas;
     private final ContaAmbienteRepositorio vinculos;
+    private final ContaFormaPagamentoRepositorio formasDePagamento;
 
     public LancamentoServico(LancamentoRepositorio lancamentos,
                              CategoriaRepositorio categorias,
                              SubcategoriaRepositorio subcategorias,
                              ContaRepositorio contas,
-                             ContaAmbienteRepositorio vinculos) {
+                             ContaAmbienteRepositorio vinculos,
+                             ContaFormaPagamentoRepositorio formasDePagamento) {
         this.lancamentos = lancamentos;
         this.categorias = categorias;
         this.subcategorias = subcategorias;
         this.contas = contas;
         this.vinculos = vinculos;
+        this.formasDePagamento = formasDePagamento;
     }
 
     // =========================================================================
@@ -144,6 +150,8 @@ public class LancamentoServico {
         novo.descrever(dados.descricao());
         novo.observar(dados.observacao());
         novo.atribuirA(dados.responsavelId());
+        novo.pagarPor(resolverFormaDePagamento(
+            dados.contaId(), dados.formaPagamento(), tipo, categoria));
 
         return lancamentos.save(novo);
     }
@@ -162,6 +170,16 @@ public class LancamentoServico {
         Lancamento l = exigir(ambienteId, id);
         Categoria categoria = exigirCategoria(ambienteId, dados.categoriaId());
         exigirContaNoAmbiente(ambienteId, dados.contaId());
+
+        // Uma perna de transferencia nao muda de categoria. Sair de
+        // TRANSFERENCIA deixaria um par ligado por lancamento_par_id com
+        // classificacoes diferentes em cada lado, e o mapa de gastos passaria a
+        // contar metade de um movimento que nao e gasto (B-D15).
+        if (l.ehPernaDeTransferencia() && !categoria.getId().equals(l.getCategoriaId())) {
+            throw new OperacaoNaoPermitida(
+                "Este lancamento e uma perna de transferencia e nao muda de categoria."
+                    + " Exclua a transferencia e refaca, se ela estiver errada.");
+        }
 
         // Reclassificar antes de tudo: ele zera a subcategoria antiga, que
         // pertencia a categoria anterior e nao sobreviveria a troca.
@@ -183,6 +201,14 @@ public class LancamentoServico {
         l.descrever(dados.descricao());
         l.observar(dados.observacao());
         l.atribuirA(dados.responsavelId());
+
+        // Sem derivacao de padrao aqui, ao contrario do POST — e a diferenca e
+        // proposital. No PUT a tela mostra o campo ja preenchido com o valor
+        // atual, entao mandar vazio e um ato: a pessoa esta LIMPANDO. Reaplicar
+        // o padrao seria desfazer, no servidor, o que ela acabou de fazer.
+        l.pagarPor(conferirFormaAceita(dados.contaId(), dados.formaPagamento(), l.getTipo()));
+
+        propagarParaOPar(l);
 
         return l;
     }
@@ -229,6 +255,120 @@ public class LancamentoServico {
                     + " informe tipo ENTRADA ou SAIDA");
         }
         return declarado;
+    }
+
+    /**
+     * A forma do lancamento novo: a informada, ou a padrao da conta para aquele
+     * sentido.
+     *
+     * <p>A regra pedida em 27/07/2026 foi "se a pessoa nao indicar, salva
+     * debito". Duas correcoes apareceram ao desenhar, e as duas viraram
+     * codigo:</p>
+     *
+     * <ul>
+     *   <li>Debito <b>literal</b> quebraria na carteira, que so aceita
+     *       {@code DINHEIRO}: gravaria nela uma forma que a lista da propria
+     *       conta recusa. Por isso o padrao e POR CONTA.</li>
+     *   <li>Entrada tambem tem "como o dinheiro se moveu" — o salario e
+     *       CREDITADO. Por isso sao DOIS padroes por conta, um de cada
+     *       sentido.</li>
+     * </ul>
+     *
+     * <h4>A ausencia que sobrou</h4>
+     *
+     * <p><b>Categoria sistemica nao recebe padrao.</b> Saldo de abertura e um
+     * lancamento em {@code AJUSTE} (A13) e transferencia e um par em
+     * {@code TRANSFERENCIA}: nenhum dos dois se moveu por pix, boleto ou coisa
+     * nenhuma — o dinheiro so trocou de lugar. Sem esta guarda, o saldo inicial
+     * de toda conta nova apareceria no extrato como "pago no debito", que e
+     * lixo visivel logo na primeira tela que a pessoa abre.</p>
+     *
+     * <p>E e ela tambem que deixa as duas pernas de uma transferencia nascerem
+     * com forma nula sem nenhum caso especial: a categoria delas e sistemica.</p>
+     */
+    private FormaPagamento resolverFormaDePagamento(UUID contaId, FormaPagamento informada,
+                                                    TipoLancamento tipo, Categoria categoria) {
+        if (informada != null) {
+            return conferirFormaAceita(contaId, informada, tipo);
+        }
+        if (categoria.isSistemica()) {
+            return null;
+        }
+
+        Optional<ContaFormaPagamento> padrao = tipo == TipoLancamento.SAIDA
+            ? formasDePagamento.findByContaIdAndPadraoSaidaTrue(contaId)
+            : formasDePagamento.findByContaIdAndPadraoEntradaTrue(contaId);
+
+        return padrao.map(ContaFormaPagamento::getForma).orElse(null);
+    }
+
+    /**
+     * Recusa forma impossivel com a frase que a tela consegue exibir.
+     *
+     * <p>Duas perguntas, e elas sao diferentes: a conta aceita esta forma? e
+     * esta forma serve a este sentido? Uma conta corrente que aceita boleto E
+     * credito em conta passaria na primeira e falharia na segunda ao tentar
+     * "salario pago no boleto".</p>
+     *
+     * <p>As duas ja sao chaves compostas no banco —
+     * {@code fk_lancamento_forma_da_conta} e
+     * {@code fk_lancamento_forma_sentido} — e sao elas que mandam. O que se
+     * ganha aqui e dizer QUAIS formas cabem, em vez de "uma restricao de
+     * integridade falhou".</p>
+     */
+    private FormaPagamento conferirFormaAceita(UUID contaId, FormaPagamento forma,
+                                               TipoLancamento tipo) {
+        if (forma == null) {
+            return null;
+        }
+
+        List<FormaPagamento> daConta = formasDePagamento.findByContaId(contaId).stream()
+            .map(ContaFormaPagamento::getForma)
+            .toList();
+
+        if (!daConta.contains(forma)) {
+            throw new OperacaoNaoPermitida(daConta.isEmpty()
+                ? "Esta conta ainda nao tem formas de pagamento cadastradas."
+                    + " Cadastre-as na tela de contas antes de usar " + forma + "."
+                : "Esta conta nao aceita " + forma + ". Formas aceitas: " + daConta);
+        }
+
+        if (!forma.aceita(tipo)) {
+            List<FormaPagamento> servem = daConta.stream().filter(f -> f.aceita(tipo)).toList();
+            throw new OperacaoNaoPermitida(
+                forma + " nao serve para lancamento de " + tipo
+                    + ". Nesta conta servem: " + servem);
+        }
+        return forma;
+    }
+
+    /**
+     * Mantem as duas pernas da transferencia dizendo a mesma coisa (F16).
+     *
+     * <p>Propaga o que <b>precisa</b> ser igual nos dois lados: valor, data de
+     * caixa e situacao. Se um lado virasse 100 e o outro continuasse 10,
+     * noventa reais apareceriam do nada no patrimonio — em silencio, porque
+     * nenhum saldo isolado pareceria errado.</p>
+     *
+     * <p>O que NAO propaga, e de proposito: a conta e a descricao. A conta e o
+     * que distingue as pernas, e corrigir "saiu do Nubank, nao do Itau" e uma
+     * correcao de um lado so. A descricao pode legitimamente diferir ("saque" de
+     * um lado, "dinheiro para a feira" do outro).</p>
+     *
+     * <p>A outra metade de F16 — apagar uma perna apaga a outra — nao esta
+     * aqui: e {@code ON DELETE CASCADE} no banco. Regra de integridade cumprida
+     * pelo banco nao tem como ser esquecida por um caminho de codigo novo.</p>
+     */
+    private void propagarParaOPar(Lancamento l) {
+        if (!l.ehPernaDeTransferencia()) {
+            return;
+        }
+        lancamentos.findById(l.getLancamentoParId()).ifPresent(par -> {
+            par.alterarValor(l.getValor());
+            par.reagendar(l.getDataCaixa(), l.getDataCaixa());
+            par.corrigirSituacao(l.getSituacao());
+            par.ajustarCompetencia(l.getDataCompetencia());
+        });
     }
 
     /**
@@ -330,7 +470,13 @@ public class LancamentoServico {
         String descricao,
         String observacao,
         UUID responsavelId,
-        SituacaoLancamento situacao
+        SituacaoLancamento situacao,
+
+        /**
+         * Como foi pago (V11). Nulo no POST faz cair no padrao da conta; nulo
+         * no PUT limpa o campo. Ver {@code resolverFormaDePagamento}.
+         */
+        FormaPagamento formaPagamento
     ) {}
 
     /** Um lancamento com o que a T-08 precisa mostrar junto dele. */

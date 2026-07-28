@@ -1,9 +1,14 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { lerErro } from '../api/cliente.js'
 import { contas as apiContas } from '../api/recursos.js'
 import Aviso from '../componentes/Aviso.jsx'
 import { useCarregar } from '../ganchos/useCarregar.js'
 import { dinheiro } from '../util/formato.js'
+import {
+  carregarFormasDePagamento,
+  formasDoSentido,
+  rotuloDaForma,
+} from '../util/formasPagamento.js'
 
 // =============================================================================
 // T-05 — Contas
@@ -16,6 +21,20 @@ import { dinheiro } from '../util/formato.js'
 //
 // Conta não se exclui, se encerra (F7), e encerrar exige saldo zero. O 409 que
 // vem daí não é erro de digitação: é o sistema dizendo que dinheiro não evapora.
+//
+// FORMAS DE PAGAMENTO (V11) — a lista é por conta, e é ela que alimenta o
+// seletor da T-08. Uma conta sem lista nenhuma continua funcionando: o que ela
+// perde é o campo "como o dinheiro se moveu" no lançamento.
+//
+// São DOIS padrões, um por sentido, e não um só. Entrada também tem "como o
+// dinheiro chegou": o salário é creditado. Um padrão único de saída deixaria
+// toda entrada em branco para sempre — e "crédito em conta" nem sequer poderia
+// ser escolhida como padrão, porque não serve para saída.
+//
+// A lista das formas e os sentidos que cada uma aceita vêm do SERVIDOR. Repetir
+// isso em JavaScript criaria a terceira cópia de uma regra que já vive no banco
+// e no enum, e a divergência apareceria como um seletor oferecendo o que o
+// servidor recusa.
 // =============================================================================
 
 const NATUREZAS = [
@@ -33,7 +52,15 @@ export default function Contas() {
 
   const [aviso, setAviso] = useState(null)
   const [editando, setEditando] = useState(null)
+  const [editandoFormas, setEditandoFormas] = useState(null)
   const [ocupado, setOcupado] = useState(false)
+
+  // O vocabulário de formas vem do servidor. Carregado uma vez por tela; o
+  // módulo compartilha a mesma promessa entre telas que montem juntas.
+  const [formasConhecidas, setFormasConhecidas] = useState([])
+  useEffect(() => {
+    carregarFormasDePagamento().then(setFormasConhecidas)
+  }, [])
 
   async function executar(acao, mensagemDeSucesso) {
     setOcupado(true)
@@ -73,6 +100,7 @@ export default function Contas() {
 
       <FormularioDeConta
         ocupado={ocupado}
+        formasConhecidas={formasConhecidas}
         aoCriar={(dadosDaConta) =>
           executar(() => apiContas.criar(dadosDaConta), `Conta "${dadosDaConta.nome}" criada.`)
         }
@@ -114,7 +142,11 @@ export default function Contas() {
               <LinhaDeConta
                 conta={conta}
                 ocupado={ocupado}
+                formasConhecidas={formasConhecidas}
                 aoEditar={() => setEditando(conta.id)}
+                aoEditarFormas={() =>
+                  setEditandoFormas(editandoFormas === conta.id ? null : conta.id)
+                }
                 aoEncerrar={() =>
                   executar(() =>
                     conta.encerradaEm
@@ -122,6 +154,23 @@ export default function Contas() {
                       : apiContas.encerrar(conta.id),
                   )
                 }
+              />
+            )}
+
+            {editandoFormas === conta.id && (
+              <EditorDeFormas
+                conta={conta}
+                ocupado={ocupado}
+                formasConhecidas={formasConhecidas}
+                aoCancelar={() => setEditandoFormas(null)}
+                aoGravar={async (formas, padraoSaida, padraoEntrada) => {
+                  const deu = await executar(
+                    () => apiContas.definirFormasDePagamento(
+                      conta.id, formas, padraoSaida, padraoEntrada),
+                    `Formas de pagamento de "${conta.nome}" atualizadas.`,
+                  )
+                  if (deu) setEditandoFormas(null)
+                }}
               />
             )}
           </li>
@@ -133,9 +182,10 @@ export default function Contas() {
 
 // ----------------------------------------------------------------------------
 
-function LinhaDeConta({ conta, ocupado, aoEditar, aoEncerrar }) {
+function LinhaDeConta({ conta, ocupado, formasConhecidas, aoEditar, aoEditarFormas, aoEncerrar }) {
   const temPrevisto = conta.saldo !== conta.saldoComPrevistos
   const compartilhada = (conta.ambientes?.length ?? 0) > 1
+  const formas = conta.formasPagamento ?? []
 
   return (
     <div className="linha-recurso linha-conta">
@@ -153,6 +203,33 @@ function LinhaDeConta({ conta, ocupado, aoEditar, aoEncerrar }) {
             compartilhada
           </span>
         )}
+        <span className="formas-da-conta">
+          {formas.length === 0 ? (
+            <span className="texto-fraco">sem forma de pagamento</span>
+          ) : (
+            formas.map((f) => {
+              const ehPadrao = f === conta.padraoSaida || f === conta.padraoEntrada
+              const sentidos = [
+                f === conta.padraoSaida && 'saídas',
+                f === conta.padraoEntrada && 'entradas',
+              ].filter(Boolean)
+
+              return (
+                <span
+                  key={f}
+                  className={`etiqueta etiqueta-fraca${ehPadrao ? ' etiqueta-padrao' : ''}`}
+                  title={
+                    ehPadrao
+                      ? `Assumida nas ${sentidos.join(' e nas ')} desta conta`
+                      : undefined
+                  }
+                >
+                  {rotuloDaForma(formasConhecidas, f)}
+                </span>
+              )
+            })
+          )}
+        </span>
       </div>
 
       <div className="saldos">
@@ -175,6 +252,11 @@ function LinhaDeConta({ conta, ocupado, aoEditar, aoEncerrar }) {
             Renomear
           </button>
         )}
+        {!conta.encerradaEm && (
+          <button type="button" className="botao-texto" onClick={aoEditarFormas} disabled={ocupado}>
+            Formas
+          </button>
+        )}
         <button type="button" className="botao-texto" onClick={aoEncerrar} disabled={ocupado}>
           {conta.encerradaEm ? 'Reabrir' : 'Encerrar'}
         </button>
@@ -183,8 +265,155 @@ function LinhaDeConta({ conta, ocupado, aoEditar, aoEncerrar }) {
   )
 }
 
-function FormularioDeConta({ aoCriar, ocupado }) {
+/**
+ * As caixas das formas, mais um seletor de padrão para cada sentido.
+ *
+ * Usado na criação e na edição, com o mesmo comportamento nos dois lugares —
+ * duas cópias divergiriam na primeira correção feita só num deles.
+ */
+function SeletorDeFormas({ formasConhecidas, formas, padraoSaida, padraoEntrada, aoMudar, desabilitado }) {
+  function alternar(valor) {
+    const nova = formas.includes(valor)
+      ? formas.filter((f) => f !== valor)
+      : [...formas, valor]
+
+    // Desmarcar uma forma que era padrão precisa limpar aquele padrão junto. O
+    // servidor recusa padrão fora da lista — e um 403 vindo daqui seria culpa
+    // da tela, que tinha como saber antes de enviar.
+    aoMudar(
+      nova,
+      nova.includes(padraoSaida) ? padraoSaida : '',
+      nova.includes(padraoEntrada) ? padraoEntrada : '',
+    )
+  }
+
+  const marcadasNoSentido = (sentido) =>
+    formasDoSentido(formasConhecidas, sentido).filter((f) => formas.includes(f.valor))
+
+  return (
+    <>
+      <fieldset className="grade-formas" disabled={desabilitado}>
+        <legend>Formas de pagamento aceitas</legend>
+        {formasConhecidas.map((f) => (
+          <label key={f.valor} className="alternador">
+            <input
+              type="checkbox"
+              checked={formas.includes(f.valor)}
+              onChange={() => alternar(f.valor)}
+            />
+            {f.nome}
+            {/* Dizer o sentido evita a pergunta "por que crédito em conta não
+                aparece no seletor de padrão de saída?" */}
+            {f.sentidos.length === 1 && (
+              <span className="texto-fraco">
+                {' '}({f.sentidos[0] === 'SAIDA' ? 'só saída' : 'só entrada'})
+              </span>
+            )}
+          </label>
+        ))}
+      </fieldset>
+
+      <div className="campos-lado-a-lado">
+        <label>
+          Padrão nas saídas
+          <select
+            value={padraoSaida}
+            disabled={desabilitado || marcadasNoSentido('SAIDA').length === 0}
+            onChange={(e) => aoMudar(formas, e.target.value, padraoEntrada)}
+          >
+            <option value="">(nenhum — sempre perguntar)</option>
+            {marcadasNoSentido('SAIDA').map((f) => (
+              <option key={f.valor} value={f.valor}>{f.nome}</option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          Padrão nas entradas
+          <select
+            value={padraoEntrada}
+            disabled={desabilitado || marcadasNoSentido('ENTRADA').length === 0}
+            onChange={(e) => aoMudar(formas, padraoSaida, e.target.value)}
+          >
+            <option value="">(nenhum — sempre perguntar)</option>
+            {marcadasNoSentido('ENTRADA').map((f) => (
+              <option key={f.valor} value={f.valor}>{f.nome}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </>
+  )
+}
+
+function EditorDeFormas({ conta, ocupado, formasConhecidas, aoGravar, aoCancelar }) {
+  const [formas, setFormas] = useState(conta.formasPagamento ?? [])
+  const [padraoSaida, setPadraoSaida] = useState(conta.padraoSaida ?? '')
+  const [padraoEntrada, setPadraoEntrada] = useState(conta.padraoEntrada ?? '')
+
+  return (
+    <form
+      className="formulario-bloco"
+      onSubmit={(e) => {
+        e.preventDefault()
+        aoGravar(formas, padraoSaida, padraoEntrada)
+      }}
+    >
+      <h3>Formas de pagamento — {conta.nome}</h3>
+
+      <SeletorDeFormas
+        formasConhecidas={formasConhecidas}
+        formas={formas}
+        padraoSaida={padraoSaida}
+        padraoEntrada={padraoEntrada}
+        desabilitado={ocupado}
+        aoMudar={(novas, novoSaida, novoEntrada) => {
+          setFormas(novas)
+          setPadraoSaida(novoSaida)
+          setPadraoEntrada(novoEntrada)
+        }}
+      />
+
+      <p className="dica">
+        Esta lista é o que o seletor da tela de lançamentos vai oferecer para
+        esta conta. Tirar uma forma que algum lançamento já usou é recusado —
+        apagá-la desses lançamentos destruiria justamente a informação que ela
+        registrava.
+      </p>
+
+      <div className="acoes-linha">
+        <button type="submit" className="botao-principal botao-pequeno" disabled={ocupado}>
+          Salvar formas
+        </button>
+        <button type="button" className="botao-texto" onClick={aoCancelar}>Cancelar</button>
+      </div>
+    </form>
+  )
+}
+
+function FormularioDeConta({ aoCriar, ocupado, formasConhecidas }) {
   const [aberto, setAberto] = useState(false)
+
+  // Nasce configurada como conta corrente, que é a maioria: débito e pix para
+  // gastar, crédito em conta para receber o salário. Não é adivinhação, é o
+  // caso comum — quem está criando a carteira desmarca tudo e marca dinheiro.
+  // Uma tela sem nada marcado faria TODA conta exigir esse trabalho.
+  const PADRAO_CONTA_CORRENTE = {
+    formas: ['DEBITO', 'PIX', 'CREDITO_EM_CONTA'],
+    saida: 'DEBITO',
+    entrada: 'CREDITO_EM_CONTA',
+  }
+
+  const [formas, setFormas] = useState(PADRAO_CONTA_CORRENTE.formas)
+  const [padraoSaida, setPadraoSaida] = useState(PADRAO_CONTA_CORRENTE.saida)
+  const [padraoEntrada, setPadraoEntrada] = useState(PADRAO_CONTA_CORRENTE.entrada)
+
+  function fechar() {
+    setAberto(false)
+    setFormas(PADRAO_CONTA_CORRENTE.formas)
+    setPadraoSaida(PADRAO_CONTA_CORRENTE.saida)
+    setPadraoEntrada(PADRAO_CONTA_CORRENTE.entrada)
+  }
 
   if (!aberto) {
     return (
@@ -209,8 +438,11 @@ function FormularioDeConta({ aoCriar, ocupado }) {
           natureza: d.get('natureza'),
           // Ausente é diferente de zero: sem valor, nenhum lançamento nasce.
           ...(saldoInicial ? { saldoInicial } : {}),
+          formasPagamento: formas,
+          padraoSaida: padraoSaida || null,
+          padraoEntrada: padraoEntrada || null,
         })
-        setAberto(false)
+        fechar()
       }}
     >
       <div className="campos-lado-a-lado">
@@ -230,17 +462,37 @@ function FormularioDeConta({ aoCriar, ocupado }) {
         </label>
       </div>
 
+      <SeletorDeFormas
+        formasConhecidas={formasConhecidas}
+        formas={formas}
+        padraoSaida={padraoSaida}
+        padraoEntrada={padraoEntrada}
+        desabilitado={ocupado}
+        aoMudar={(novas, novoSaida, novoEntrada) => {
+          setFormas(novas)
+          setPadraoSaida(novoSaida)
+          setPadraoEntrada(novoEntrada)
+        }}
+      />
+
       <p className="dica">
         O saldo inicial não é um campo da conta: ele vira um lançamento na
         categoria <strong>Ajuste</strong>. O saldo continua sendo só a soma dos
         lançamentos, sempre. Aceita negativo, para conta que começa devendo.
       </p>
 
+      <p className="dica">
+        Os padrões são o que um lançamento assume quando você não diz como o
+        dinheiro se moveu. Não valem para o saldo inicial nem para
+        transferências — nenhum dos dois se moveu por pix, boleto ou coisa
+        nenhuma: o dinheiro só trocou de lugar.
+      </p>
+
       <div className="acoes-linha">
         <button type="submit" className="botao-principal botao-pequeno" disabled={ocupado}>
           Criar conta
         </button>
-        <button type="button" className="botao-texto" onClick={() => setAberto(false)}>
+        <button type="button" className="botao-texto" onClick={fechar}>
           Cancelar
         </button>
       </div>

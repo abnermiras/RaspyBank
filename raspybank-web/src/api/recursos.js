@@ -45,6 +45,36 @@ export const contas = {
   alterar: (id, dados) => pedirComRenovacao(`/api/contas/${id}`, json('PUT', dados)),
   encerrar: (id) => pedirComRenovacao(`/api/contas/${id}/encerrar`, json('POST')),
   reabrir: (id) => pedirComRenovacao(`/api/contas/${id}/reabrir`, json('POST')),
+
+  /**
+   * Substitui a lista inteira, não acrescenta. `formas: []` deixa a conta sem
+   * nenhuma, e `padrao: null` é válido — aceitar várias sem ter preferência.
+   *
+   * Pode responder 409: remover uma forma que algum lançamento já usou é
+   * recusado, para não apagar em silêncio o dado que ela registrava.
+   */
+  definirFormasDePagamento: (id, formas, padraoSaida, padraoEntrada) =>
+    pedirComRenovacao(
+      `/api/contas/${id}/formas-pagamento`,
+      json('PUT', {
+        formas,
+        padraoSaida: padraoSaida || null,
+        padraoEntrada: padraoEntrada || null,
+      }),
+    ),
+}
+
+// ------------------------------------------------------------- transferências
+export const transferencias = {
+  /**
+   * Cria as DUAS pernas numa transação só. Não existe endpoint para criar uma
+   * perna: a primeira sozinha já é um saldo errado.
+   *
+   * Não manda categoria (é sempre a sistêmica TRANSFERENCIA), nem tipo (origem
+   * é saída, destino é entrada), nem forma de pagamento (categoria sistêmica não
+   * recebe padrão — quem quiser registrar "por pix" edita a perna depois).
+   */
+  criar: (dados) => pedirComRenovacao('/api/transferencias', json('POST', dados)),
 }
 
 // --------------------------------------------------------------- lançamentos

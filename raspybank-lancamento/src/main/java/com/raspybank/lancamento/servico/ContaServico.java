@@ -4,15 +4,19 @@ import com.raspybank.lancamento.dominio.Categoria;
 import com.raspybank.lancamento.dominio.CodigoSistemico;
 import com.raspybank.lancamento.dominio.Conta;
 import com.raspybank.lancamento.dominio.ContaAmbiente;
+import com.raspybank.lancamento.dominio.ContaFormaPagamento;
+import com.raspybank.lancamento.dominio.FormaPagamento;
 import com.raspybank.lancamento.dominio.Lancamento;
 import com.raspybank.lancamento.dominio.NaturezaConta;
 import com.raspybank.lancamento.dominio.TipoLancamento;
 import com.raspybank.lancamento.repositorio.CategoriaRepositorio;
 import com.raspybank.lancamento.repositorio.ContaAmbienteRepositorio;
+import com.raspybank.lancamento.repositorio.ContaFormaPagamentoRepositorio;
 import com.raspybank.lancamento.repositorio.ContaRepositorio;
 import com.raspybank.lancamento.repositorio.LancamentoRepositorio;
 import com.raspybank.lancamento.dominio.SaldoDaConta;
 import com.raspybank.shared.erro.ConflitoDeEstado;
+import com.raspybank.shared.erro.OperacaoNaoPermitida;
 import com.raspybank.shared.erro.RecursoNaoEncontrado;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -26,6 +30,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -56,6 +61,7 @@ public class ContaServico {
     private final ContaAmbienteRepositorio vinculos;
     private final CategoriaRepositorio categorias;
     private final LancamentoRepositorio lancamentos;
+    private final ContaFormaPagamentoRepositorio formasDePagamento;
 
     @PersistenceContext
     private EntityManager em;
@@ -63,11 +69,13 @@ public class ContaServico {
     public ContaServico(ContaRepositorio contas,
                         ContaAmbienteRepositorio vinculos,
                         CategoriaRepositorio categorias,
-                        LancamentoRepositorio lancamentos) {
+                        LancamentoRepositorio lancamentos,
+                        ContaFormaPagamentoRepositorio formasDePagamento) {
         this.contas = contas;
         this.vinculos = vinculos;
         this.categorias = categorias;
         this.lancamentos = lancamentos;
+        this.formasDePagamento = formasDePagamento;
     }
 
     // =========================================================================
@@ -103,11 +111,21 @@ public class ContaServico {
                 .add(v.getAmbienteId());
         }
 
+        // Quarta consulta, mesmo criterio das outras tres: uma para as formas de
+        // TODAS as contas, nao uma por conta.
+        Map<UUID, List<ContaFormaPagamento>> formasPorConta = new HashMap<>();
+        for (ContaFormaPagamento f : formasDePagamento.findByContaIdIn(ids)) {
+            formasPorConta
+                .computeIfAbsent(f.getContaId(), k -> new ArrayList<>())
+                .add(f);
+        }
+
         return lista.stream()
             .map(c -> new Resumo(
                 c,
                 saldos.getOrDefault(c.getId(), SaldoDaConta.zeradoPara(c.getId())),
-                ambientesPorConta.getOrDefault(c.getId(), List.of())))
+                ambientesPorConta.getOrDefault(c.getId(), List.of()),
+                formasPorConta.getOrDefault(c.getId(), List.of())))
             .toList();
     }
 
@@ -131,7 +149,7 @@ public class ContaServico {
             .map(ContaAmbiente::getAmbienteId)
             .toList();
 
-        return new Resumo(c, saldo, ambienteIds);
+        return new Resumo(c, saldo, ambienteIds, formasDePagamento.findByContaId(contaId));
     }
 
     @Transactional(readOnly = true)
@@ -162,7 +180,9 @@ public class ContaServico {
      */
     @Transactional
     public Conta criar(UUID ambienteId, String nome, NaturezaConta natureza,
-                       BigDecimal saldoInicial, UUID usuarioId, LocalDate hoje) {
+                       BigDecimal saldoInicial, Set<FormaPagamento> formas,
+                       FormaPagamento padraoSaida, FormaPagamento padraoEntrada,
+                       UUID usuarioId, LocalDate hoje) {
 
         UUID contaId = (UUID) em.createNativeQuery(
                 "SELECT app_criar_conta(:ambiente, :nome, :natureza)")
@@ -176,12 +196,62 @@ public class ContaServico {
         // consulta nativa e o lancamento esbarraria na chave composta.
         em.flush();
 
+        // As formas entram ANTES do saldo de abertura, mas isso nao muda nada
+        // para ele: o lancamento de abertura e sistemico (AJUSTE) e nunca
+        // recebe forma de pagamento — saldo inicial nao foi "pago" de jeito
+        // nenhum. Ver registrarAjusteDeAbertura.
+        gravarFormas(contaId, formas, padraoSaida, padraoEntrada);
+
         if (saldoInicial != null && saldoInicial.signum() != 0) {
             registrarAjusteDeAbertura(ambienteId, contaId, saldoInicial, usuarioId, hoje);
         }
 
         return contas.findById(contaId).orElseThrow(() -> new IllegalStateException(
             "Conta criada pela porta estreita nao ficou visivel — vinculo ausente?"));
+    }
+
+    /**
+     * Substitui a lista de formas de pagamento aceitas pela conta (T-05).
+     *
+     * <p>Substituicao e nao acrescimo: a tela mostra a lista inteira com as
+     * caixas marcadas, entao o que ela envia <b>e</b> o estado desejado. Um
+     * endpoint de acrescimo exigiria um segundo de remocao, e desmarcar uma
+     * caixa passaria a ser duas chamadas.</p>
+     *
+     * <p>Remover uma forma que algum lancamento da conta ja usou e recusado com
+     * <b>409</b>, e a mensagem diz quantos. A alternativa seria apagar a forma
+     * dos lancamentos antigos — destruindo em silencio exatamente o dado que
+     * esta funcionalidade veio registrar.</p>
+     *
+     * <p>Os dois padroes podem ser nulos: aceitar tres formas sem ter
+     * preferencia e legitimo. Se informados, precisam estar em {@code formas} e
+     * aceitar o sentido correspondente.</p>
+     */
+    @Transactional
+    public Conta definirFormasDePagamento(UUID ambienteId, UUID contaId,
+                                          Set<FormaPagamento> formas,
+                                          FormaPagamento padraoSaida,
+                                          FormaPagamento padraoEntrada) {
+
+        Conta c = exigir(ambienteId, contaId);
+
+        Set<FormaPagamento> desejadas = formas == null ? Set.of() : formas;
+
+        for (ContaFormaPagamento atual : formasDePagamento.findByContaId(contaId)) {
+            if (desejadas.contains(atual.getForma())) {
+                continue;
+            }
+            long emUso = lancamentos.countByContaIdAndFormaPagamento(contaId, atual.getForma());
+            if (emUso > 0) {
+                throw new ConflitoDeEstado(
+                    "Nao da para tirar " + atual.getForma() + " desta conta: "
+                        + emUso + " lancamento(s) usam essa forma."
+                        + " Altere esses lancamentos antes.");
+            }
+        }
+
+        gravarFormas(contaId, desejadas, padraoSaida, padraoEntrada);
+        return c;
     }
 
     @Transactional
@@ -226,6 +296,95 @@ public class ContaServico {
 
     // =========================================================================
 
+    /**
+     * Grava a lista desejada, em tres passos que existem por causa dos indices.
+     *
+     * <p>{@code ux_cfp_padrao_saida} e {@code ux_cfp_padrao_entrada} sao
+     * indices unicos parciais, verificados a cada comando. Mover o padrao de
+     * saida de {@code DEBITO} para {@code PIX}: marcar PIX antes de desmarcar
+     * DEBITO deixa duas linhas verdadeiras no meio do caminho e o banco recusa.
+     * Por isso <b>tudo</b> e desmarcado primeiro, as linhas novas nascem
+     * falsas, e so no fim uma de cada sentido e marcada.</p>
+     *
+     * <p>Os {@code flush()} nao sao supersticao: sem eles o Hibernate pode
+     * juntar os tres passos numa ordem propria e recriar exatamente o estado
+     * intermediario que a sequencia existe para evitar.</p>
+     */
+    private void gravarFormas(UUID contaId, Set<FormaPagamento> formas,
+                              FormaPagamento padraoSaida, FormaPagamento padraoEntrada) {
+
+        Set<FormaPagamento> desejadas = formas == null ? Set.of() : formas;
+
+        exigirPadraoCoerente(desejadas, padraoSaida, TipoLancamento.SAIDA);
+        exigirPadraoCoerente(desejadas, padraoEntrada, TipoLancamento.ENTRADA);
+
+        List<ContaFormaPagamento> atuais = formasDePagamento.findByContaId(contaId);
+
+        // Passo 1 — nenhuma padrao, e as removidas saem.
+        atuais.forEach(f -> {
+            f.definirPadrao(TipoLancamento.SAIDA, false);
+            f.definirPadrao(TipoLancamento.ENTRADA, false);
+        });
+        formasDePagamento.deleteAll(atuais.stream()
+            .filter(f -> !desejadas.contains(f.getForma()))
+            .toList());
+        em.flush();
+
+        // Passo 2 — as que faltam entram, todas falsas.
+        Set<FormaPagamento> jaExistem = atuais.stream()
+            .map(ContaFormaPagamento::getForma)
+            .filter(desejadas::contains)
+            .collect(Collectors.toSet());
+
+        desejadas.stream()
+            .filter(nova -> !jaExistem.contains(nova))
+            .forEach(nova -> formasDePagamento.save(new ContaFormaPagamento(contaId, nova)));
+        em.flush();
+
+        // Passo 3 — agora sim, uma de cada sentido.
+        marcarPadrao(contaId, padraoSaida, TipoLancamento.SAIDA);
+        marcarPadrao(contaId, padraoEntrada, TipoLancamento.ENTRADA);
+        em.flush();
+    }
+
+    /**
+     * Recusa padrao incoerente com uma frase, antes que o banco recuse com um
+     * codigo de constraint.
+     *
+     * <p>A segunda checagem — se a forma aceita o sentido — nao esta duplicando
+     * o banco por acaso. A tabela {@code conta_forma_pagamento} de proposito
+     * NAO tem um CHECK impedindo {@code CREDITO_EM_CONTA} como padrao de saida:
+     * seria a segunda copia da regra de sentido. O dado ruim nao consegue
+     * produzir lancamento ruim de qualquer jeito, porque
+     * {@code fk_lancamento_forma_sentido} barra na hora de lancar. O que se
+     * ganha aqui e falhar cedo, e com uma frase que a tela exibe.</p>
+     */
+    private static void exigirPadraoCoerente(Set<FormaPagamento> desejadas,
+                                             FormaPagamento padrao,
+                                             TipoLancamento sentido) {
+        if (padrao == null) {
+            return;
+        }
+        if (!desejadas.contains(padrao)) {
+            throw new OperacaoNaoPermitida(
+                "Forma padrao " + padrao + " precisa estar entre as formas aceitas pela conta");
+        }
+        if (!padrao.aceita(sentido)) {
+            throw new OperacaoNaoPermitida(
+                padrao + " nao serve para " + sentido + ", entao nao pode ser o padrao desse sentido");
+        }
+    }
+
+    private void marcarPadrao(UUID contaId, FormaPagamento forma, TipoLancamento sentido) {
+        if (forma == null) {
+            return;
+        }
+        formasDePagamento
+            .findById(new ContaFormaPagamento.Chave(contaId, forma))
+            .orElseThrow(() -> new IllegalStateException("Forma padrao nao ficou gravada: " + forma))
+            .definirPadrao(sentido, true);
+    }
+
     private void registrarAjusteDeAbertura(UUID ambienteId, UUID contaId,
                                            BigDecimal saldoInicial, UUID usuarioId,
                                            LocalDate hoje) {
@@ -262,6 +421,7 @@ public class ContaServico {
     }
 
     /** Uma conta com o que a T-05 precisa mostrar junto dela. */
-    public record Resumo(Conta conta, SaldoDaConta saldo, List<UUID> ambienteIds) {
+    public record Resumo(Conta conta, SaldoDaConta saldo, List<UUID> ambienteIds,
+                         List<ContaFormaPagamento> formasDePagamento) {
     }
 }

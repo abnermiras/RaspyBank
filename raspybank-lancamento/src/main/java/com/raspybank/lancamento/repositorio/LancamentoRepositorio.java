@@ -1,5 +1,6 @@
 package com.raspybank.lancamento.repositorio;
 
+import com.raspybank.lancamento.dominio.FormaPagamento;
 import com.raspybank.lancamento.dominio.Lancamento;
 import com.raspybank.lancamento.dominio.LinhaDoMapa;
 import com.raspybank.lancamento.dominio.SaldoDaConta;
@@ -179,4 +180,15 @@ public interface LancamentoRepositorio extends JpaRepository<Lancamento, UUID> {
      * pessoa esta prestes a tirar do seletor.</p>
      */
     long countByCategoriaId(UUID categoriaId);
+
+    /**
+     * Quantos lancamentos da conta usam esta forma de pagamento.
+     *
+     * <p>Serve para recusar a remocao de uma forma da lista de uma conta ANTES
+     * de o banco recusar. A chave {@code fk_lancamento_forma_pagamento} ja e
+     * {@code ON DELETE RESTRICT} e barraria de qualquer jeito — o que se ganha
+     * aqui e a frase: "3 lancamentos usam BOLETO" contra "uma restricao de
+     * integridade falhou", que a tela nao tem como transformar em instrucao.</p>
+     */
+    long countByContaIdAndFormaPagamento(UUID contaId, FormaPagamento formaPagamento);
 }

@@ -16,6 +16,6 @@ public enum NaturezaConta {
     /** O dinheiro e seu: conta corrente, poupanca, carteira, investimento. */
     ATIVO,
 
-    /** Voce deve: cartao de credito (V11), emprestimo, financiamento. */
+    /** Voce deve: cartao de credito (V12), emprestimo, financiamento. */
     PASSIVO
 }

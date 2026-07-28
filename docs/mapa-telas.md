@@ -53,7 +53,7 @@ Lista contas do ambiente; cria conta com nome, natureza (`ATIVO`/`PASSIVO`, F6).
 ### T-06 — Cartões de crédito
 Cadastro do contrato (cartão = especialização de conta, F5/F17) e dos cartões emitidos (F18): limite, dia de fechamento, dia de vencimento, responsável padrão (F22).
 - Fatura, parcelas e limites derivados aparecem AQUI numa versão futura da tela — o cadastro vem primeiro.
-- **API: não existe — depende da V11 (a parte mais complexa do domínio: fatura/parcela/F19–F23).**
+- **API: não existe — depende da V12 (a parte mais complexa do domínio: fatura/parcela/F19–F23).**
 
 ### T-07 — Mapa de gastos (a tela central inicial)
 A razão de ser do sistema. **Período: ano civil, com seletor de ano** (P-T3). Três blocos empilhados (P-T5):
@@ -109,7 +109,7 @@ O menor sistema que uma pessoa da família consegue USAR de ponta a ponta:
 **Falta, na ordem imposta pelas telas:**
 1. **Migração V10** — a lista canônica das tabelas vive em `decisoes.md` §6, não aqui. *(Este documento repetia a lista e ela divergiu em silêncio: foi o achado I-19 de 26/07. Referenciar, nunca repetir.)*
 2. **API V10:** CRUD de categorias/subcategorias, CRUD de contas, CRUD de lançamentos, endpoint do mapa de gastos. Contrato em `docs/api.md`, escrito **antes** do código.
-3. **Migração V11 + API:** cartão/cartão emitido/fatura/parcela/recorrência — junto com a T-06.
+3. **Migração V12 + API:** cartão/cartão emitido/fatura/parcela/recorrência — junto com a T-06.
 
 O fatiamento foi confirmado e formalizado em B-D1: a V10 é exatamente o que o mínimo aceitável consome.
 
@@ -277,3 +277,39 @@ Corrigido o módulo, a imagem ainda falhava: os testes de integração sobem um 
 A imagem passou a rodar só os testes que **podem** rodar lá (27 puros + 9 de arquitetura), e o **`make gate` agora depende do `make build`**: a suíte inteira roda aqui fora, com Docker disponível, antes de qualquer imagem ser construída. O gate só é honesto assim.
 
 **Verificado em 27/07/2026:** 138 testes verdes; imagem construída e no ar; `/`, `/entrar`, `/mapa`, `/contas` devolvendo a SPA; `/rota-inventada` e `/api/perfil` em 401; `/assets/inventado.js` em 404. O hash do bundle dentro da imagem é **idêntico** ao do build local — o `npm ci` a partir do lock é reproduzível.
+
+---
+
+## 11. Forma de pagamento e transferência (27/07/2026) — o primeiro retorno dos testes de negócio
+
+A primeira coisa que o uso real devolveu não foi um defeito: foi uma **ausência**. Um gasto de "gasolina, R$ 10" ficou registrado sem que desse para saber se tinha sido débito, pix ou boleto. O dado não estava errado — nunca tinha sido capturado, e isso não se recupera depois.
+
+Decisões em `decisoes.md` §4e (B-D30 a B-D40); contrato em `api.md` §4, §4b, §5 e §5b.
+
+### Duas correções do Abner sobre o meu desenho
+
+**"Crédito é recebimento."** Minha primeira versão recusava forma de pagamento em ENTRADA, com o argumento de que "salário não é pago no débito". O argumento estava certo e o alvo errado: a pergunta útil não é *como foi pago*, é **como o dinheiro se moveu** — e ela tem resposta nos dois sentidos. Salário é *creditado*. Daí `CREDITO_EM_CONTA`, os sentidos por forma, e **dois padrões por conta**.
+
+**"Não precisa nem da palavra saque."** Eu tinha proposto `SAQUE` como forma de pagamento na perna de saída. Ele cortou: *"pode deixar tudo transferência mesmo — transferiu para carteira 100 reais, intrínseco que é um saque"*. Está certo, e pelo motivo mais forte: um segundo nome para o mesmo evento obrigaria todo relatório futuro a conhecer os dois, e esquecer um viraria número errado sem aviso.
+
+### Uma correção minha sobre a dele
+
+Ele pediu "se a pessoa não indicar, salva **débito**". Débito literal gravaria na Carteira — que só aceita DINHEIRO — uma forma que a lista da própria conta recusa, em silêncio. Virou **padrão por conta**: na corrente `DEBITO`, na carteira `DINHEIRO`, e o comportamento pedido acontece nas duas.
+
+### O buraco que a transferência revelou
+
+`F2` diz "dois lançamentos **ligados**" e `F16` diz "transferência **propaga para o par**", desde o modelo lógico. Fui procurar a coluna que expressa o par: **não existia**. A promessa estava no documento e não no schema, e nenhuma migração até a V10 tinha reparado.
+
+Sem ela, apagar uma perna deixa a outra órfã e **R$ 100 aparecem do nada** no patrimônio — em silêncio, porque nenhum saldo isolado parece errado.
+
+### Coisas que só apareceram ao fazer
+
+- **A regra de sentido virou tabela, não CHECK.** Com CHECKs ela apareceria em três lugares (lançamento, padrão da conta, enum Java) e três cópias divergem. Virou `forma_pagamento_sentido`, onze linhas, consultadas por chave composta — o mesmo padrão que a V10 já usa três vezes. Efeito colateral bom: nasceu o `GET /api/formas-pagamento` e o **frontend deixou de ter a lista em JavaScript**, matando a quarta cópia.
+- **Duas chaves compostas no lançamento, não uma.** A primeira ("a conta aceita esta forma?") não basta: uma conta corrente que aceita boleto E crédito em conta permitiria "salário pago no boleto". Quem barra é a segunda ("esta forma serve a este sentido?").
+- **`ux_cfp_padrao_*` obriga uma ordem de gravação.** Mover o padrão de `DEBITO` para `PIX` marcando PIX antes de desmarcar DEBITO deixa duas linhas verdadeiras no meio do caminho, e o índice parcial recusa. `gravarFormas` desmarca tudo, insere as novas como falsas, e só então marca — com `flush()` entre os passos, senão o Hibernate reordena e recria o estado que a sequência evita.
+- **A cascata do par ficou no banco, não no serviço.** `ON DELETE CASCADE` mútuo cumpre a metade mais perigosa de F16. Regra de integridade cumprida pelo banco não tem como ser esquecida por um caminho de código novo — e este é o caso em que esquecer faz dinheiro aparecer do nada.
+- **As pernas nascem sem forma de pagamento e não há uma linha de código para isso.** Cai da guarda que já existia: categoria sistêmica não recebe padrão, e transferência é sistêmica.
+- **A V11 tomou o número que era do cartão.** Cartão virou V12. Os comentários dentro da V10 continuam dizendo "V11 = cartão" e **não foram corrigidos de propósito**: migração aplicada é imutável, e editar mudaria o checksum do Flyway.
+- **A mensagem de encerrar conta deixou de mentir.** Ela mandava "transfira ou ajuste o valor antes" desde a fatia 2, e transferir não existia. Metade da instrução apontava para o vazio.
+
+**Verificado em 27/07/2026:** 173 testes verdes (eram 138), sendo 21 em `FormaPagamentoApiTest` e 14 em `TransferenciaApiTest`. O teste que mais importa é `TransferenciaApiTest.excluirUmaPernaExcluiAsDuas`: confere que o **patrimônio total** volta exatamente ao que era, em centavos inteiros.

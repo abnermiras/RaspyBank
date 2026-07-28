@@ -48,7 +48,7 @@ O documento de requisitos especifica Argon2id para hash de senha; a implementaç
 ## I-07 — Estados da Fatura (pendência herdada dos requisitos)
 
 Confirmar o conjunto derivável: Aberta, Fechada, Paga, Vencida — lembrando F19: **não existe coluna de status**; tudo deriva de `fechada_em` + somas de pagamento + vencimento.
-**Quando resolver:** no desenho da **V11** (a fatia 2 passou a ser V11 por B-D1; `fatura` não está mais na V10).
+**Quando resolver:** no desenho da **V12** (era V11 antes de B-D30) (a fatia 2 passou a ser V11 por B-D1; `fatura` não está mais na V10).
 
 ## I-08 — Entrada de usuário em ambiente existente (pendência herdada)
 
@@ -124,7 +124,7 @@ Origem: auditoria dos documentos contra o código, feita a pedido, **antes** de 
 
 `decisoes.md` §6 dizia V10 = `conta`, `conta_ambiente`, `cartao`, `cartao_emitido`, `fatura`. `mapa-telas.md` §4 dizia fatia 1 = `categoria`, `subcategoria`, `conta`, `lancamento`. Nenhuma lista continha a outra, e **nenhuma das duas estava completa**: faltava `conta_ambiente` numa (sem ela `conta` não tem política de RLS, porque R7 faz a visibilidade por subquery sobre a tabela de vínculo) e faltavam `categoria`, `lancamento`, `parcela` e `regra_recorrencia` na outra.
 
-**Resolução:** B-D1 — V10 (fatia 1) e V11 (fatia 2), com as listas completas em `decisoes.md` §6.
+**Resolução:** B-D1 — V10 (fatia 1) e V12 (fatia 2, era V11), com as listas completas em `decisoes.md` §6.
 **Lição registrada:** duas listas da mesma coisa em documentos diferentes divergem sem ninguém perceber. A lista canônica é a de `decisoes.md` §6; `mapa-telas.md` referencia, não repete.
 
 ## I-20 — Lançamento em conta compartilhada não tinha ambiente definido — **RESOLVIDO em 26/07/2026**
@@ -174,7 +174,7 @@ O saldo é a soma dos lançamentos, e o RLS só libera os dos ambientes a que a 
 |---|---|---|
 | I-04 + I-13 | Canal auto-declarado (`Canal.WEB` fixo, header `X-Canal`) | Primeiro item do trabalho do bot Telegram. B-D6 preparou o terreno: o canal já viaja no contexto do RLS |
 | I-06 | Argon2id (requisitos) × BCrypt 12 (código) | Antes de publicar para terceiros |
-| I-07 | Estados da Fatura | Desenho da V11 |
+| I-07 | Estados da Fatura | Desenho da V12 |
 | I-08 | Entrada de usuário em ambiente existente (convite) | Depois do mínimo, antes de uso compartilhado real |
 | I-18 | Tela de sessões ativas | Depois do mínimo, antes de exposição à internet |
 | I-23 | Saldo parcial em conta compartilhada entre ambientes que o usuário não enxerga | Junto de I-08. Sem convite, não há segundo usuário para divergir |

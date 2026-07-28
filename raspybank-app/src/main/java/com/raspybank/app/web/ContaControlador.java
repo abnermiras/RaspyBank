@@ -3,6 +3,8 @@ package com.raspybank.app.web;
 import com.raspybank.ambiente.dominio.Ambiente;
 import com.raspybank.ambiente.servico.AmbienteServico;
 import com.raspybank.lancamento.dominio.Conta;
+import com.raspybank.lancamento.dominio.ContaFormaPagamento;
+import com.raspybank.lancamento.dominio.FormaPagamento;
 import com.raspybank.lancamento.dominio.NaturezaConta;
 import com.raspybank.lancamento.dominio.SaldoDaConta;
 import com.raspybank.lancamento.servico.ContaServico;
@@ -29,6 +31,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -92,10 +95,34 @@ public class ContaControlador {
             pedido.nome().trim(),
             pedido.natureza(),
             pedido.saldoInicialComoDecimal(),
+            pedido.formasComoConjunto(),
+            pedido.padraoSaida(),
+            pedido.padraoEntrada(),
             usuarioId,
             LocalDate.now());
 
         return ResponseEntity.status(HttpStatus.CREATED).body(resposta(c.getId()));
+    }
+
+    /**
+     * Substitui as formas de pagamento aceitas pela conta.
+     *
+     * <p>Endpoint proprio e nao um campo no {@code PUT /{id}}: renomear e
+     * redefinir a lista sao operacoes com riscos diferentes. Renomear nunca
+     * falha; mexer na lista pode ser recusado com 409 se algum lancamento usa a
+     * forma removida, e juntar as duas faria uma recusa dessas impedir tambem a
+     * troca de nome, que nao tinha nada a ver.</p>
+     */
+    @PutMapping("/{id}/formas-pagamento")
+    public ContaResposta definirFormasDePagamento(
+            @PathVariable UUID id,
+            @Valid @RequestBody PedidoFormasDePagamento pedido) {
+
+        contas.definirFormasDePagamento(
+            ambienteAtivo(), id, pedido.formasComoConjunto(),
+            pedido.padraoSaida(), pedido.padraoEntrada());
+
+        return resposta(id);
     }
 
     @PutMapping("/{id}")
@@ -170,12 +197,32 @@ public class ContaControlador {
          */
         @Pattern(regexp = "-?\\d{1,13}(\\.\\d{1,2})?",
                  message = "saldoInicial deve ser decimal com ate duas casas, como \"3000.00\"")
-        String saldoInicial
+        String saldoInicial,
+
+        /**
+         * As formas que esta conta aceita (V11). Opcional: conta sem lista
+         * nenhuma continua funcionando exatamente como antes desta versao, e as
+         * contas criadas antes dela ficaram assim. O que ela perde e so o
+         * seletor de forma na T-08.
+         */
+        List<FormaPagamento> formasPagamento,
+
+        /**
+         * Assumidas quando o lancamento nao informa forma. Precisam estar em
+         * {@code formasPagamento} e aceitar o sentido correspondente; o servico
+         * recusa com 403 se nao estiverem.
+         */
+        FormaPagamento padraoSaida,
+        FormaPagamento padraoEntrada
     ) {
         BigDecimal saldoInicialComoDecimal() {
             return saldoInicial == null || saldoInicial.isBlank()
                 ? null
                 : new BigDecimal(saldoInicial);
+        }
+
+        Set<FormaPagamento> formasComoConjunto() {
+            return formasPagamento == null ? Set.of() : Set.copyOf(formasPagamento);
         }
     }
 
@@ -184,6 +231,26 @@ public class ContaControlador {
         @Size(max = 60, message = "nome deve ter no maximo 60 caracteres")
         String nome
     ) {}
+
+    /**
+     * O estado desejado da lista inteira, nao um acrescimo.
+     *
+     * <p>A tela mostra as seis formas com caixas marcadas, entao o que ela
+     * manda ja e a resposta completa. Um endpoint de acrescimo exigiria outro
+     * de remocao, e desmarcar uma caixa viraria duas chamadas.</p>
+     */
+    public record PedidoFormasDePagamento(
+        @NotNull(message = "formas e obrigatorio: envie [] para nao aceitar nenhuma")
+        List<FormaPagamento> formas,
+
+        /** Nulos sao validos: aceitar tres formas sem ter preferencia e legitimo. */
+        FormaPagamento padraoSaida,
+        FormaPagamento padraoEntrada
+    ) {
+        Set<FormaPagamento> formasComoConjunto() {
+            return Set.copyOf(formas);
+        }
+    }
 
     /**
      * Dois saldos, nunca um (mesma razao de B-D10 no mapa): {@code saldo} e o
@@ -198,21 +265,46 @@ public class ContaControlador {
         OffsetDateTime encerradaEm,
         String saldo,
         String saldoComPrevistos,
-        List<AmbienteResumo> ambientes
+        List<AmbienteResumo> ambientes,
+
+        /**
+         * As formas que esta conta aceita, e a padrao. Ordenadas pela ordem do
+         * enum e nao pela do banco: sem {@code ORDER BY} explicito a lista pode
+         * mudar de ordem entre duas chamadas iguais, e a tela ficaria com as
+         * caixas dancando sem que nada tivesse mudado.
+         */
+        List<FormaPagamento> formasPagamento,
+        FormaPagamento padraoSaida,
+        FormaPagamento padraoEntrada
     ) {
         static ContaResposta de(ContaServico.Resumo r, Map<UUID, String> nomes) {
-            return de(r.conta(), r.saldo(), r.ambienteIds(), nomes::get);
+            return de(r.conta(), r.saldo(), r.ambienteIds(), r.formasDePagamento(), nomes::get);
         }
 
-        static ContaResposta de(Conta c, SaldoDaConta saldo,
-                                List<UUID> ambienteIds, Function<UUID, String> nome) {
+        static ContaResposta de(Conta c, SaldoDaConta saldo, List<UUID> ambienteIds,
+                                List<ContaFormaPagamento> formas, Function<UUID, String> nome) {
             return new ContaResposta(
                 c.getId(), c.getNome(), c.getNatureza(), c.getEncerradaEm(),
                 dinheiro(saldo.realizado()),
                 dinheiro(saldo.comPrevistos()),
                 ambienteIds.stream()
                     .map(id -> new AmbienteResumo(id, nome.apply(id)))
-                    .toList());
+                    .toList(),
+                formas.stream()
+                    .map(ContaFormaPagamento::getForma)
+                    .sorted()
+                    .toList(),
+                padrao(formas, ContaFormaPagamento::isPadraoSaida),
+                padrao(formas, ContaFormaPagamento::isPadraoEntrada));
+        }
+
+        private static FormaPagamento padrao(List<ContaFormaPagamento> formas,
+                                             java.util.function.Predicate<ContaFormaPagamento> ehPadrao) {
+            return formas.stream()
+                .filter(ehPadrao)
+                .map(ContaFormaPagamento::getForma)
+                .findFirst()
+                .orElse(null);
         }
 
         /** Sempre duas casas, sempre string. "1250" e "1250.00" seriam o mesmo dinheiro escrito de dois jeitos. */

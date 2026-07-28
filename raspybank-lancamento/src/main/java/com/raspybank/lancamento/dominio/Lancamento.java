@@ -92,6 +92,43 @@ public class Lancamento {
     @Column(name = "observacao")
     private String observacao;
 
+    /**
+     * Como o dinheiro se moveu (V11). Vale nos DOIS sentidos: gasto no debito e
+     * salario creditado sao as duas metades da mesma pergunta.
+     *
+     * <p>Anulavel de proposito, e por tres razoes distintas: nem toda
+     * movimentacao tem forma conhecida; saldo de abertura ({@code AJUSTE}) e
+     * transferencia ({@code TRANSFERENCIA}) nao se moveram de forma alguma; e
+     * registrar depois, na edicao, e legitimo.</p>
+     *
+     * <p>Nao entra em soma nenhuma. Quem confere sao DUAS chaves compostas no
+     * banco — {@code fk_lancamento_forma_da_conta}, que exige a forma na lista
+     * daquela conta, e {@code fk_lancamento_forma_sentido}, que exige que ela
+     * aceite o sentido. Nenhuma das duas vira {@code if} aqui: a entidade nao
+     * enxerga a lista da conta nem a tabela de sentidos, e fingir que enxerga
+     * criaria uma segunda verdade.</p>
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "forma_pagamento")
+    private FormaPagamento formaPagamento;
+
+    /**
+     * A outra perna da transferencia (F2). Nulo em lancamento comum.
+     *
+     * <p>O vinculo e MUTUO: A aponta para B e B aponta para A. Poderia ser um
+     * ponteiro so, do "filho" para o "pai", e nao e de proposito — numa
+     * transferencia nao existe perna principal. Escolher uma criaria uma
+     * assimetria que o dominio nao tem, e todo codigo que le o par precisaria
+     * saber de que lado esta.</p>
+     *
+     * <p>A metade mais perigosa de F16 e cumprida pelo BANCO:
+     * {@code fk_lancamento_par} e {@code ON DELETE CASCADE}, entao apagar uma
+     * perna apaga a outra. Sem isso, apagar metade de uma transferencia faria
+     * dinheiro aparecer do nada no patrimonio.</p>
+     */
+    @Column(name = "lancamento_par_id")
+    private UUID lancamentoParId;
+
     /** Quando o fato ocorreu — a compra, o servico prestado. */
     @Column(name = "data_competencia", nullable = false)
     private LocalDate dataCompetencia;
@@ -235,6 +272,38 @@ public class Lancamento {
 
     public void descrever(String descricao)     { this.descricao = descricao; }
     public void observar(String observacao)     { this.observacao = observacao; }
+
+    /**
+     * Registra como o dinheiro se moveu. Aceita {@code null} — nao saber e um
+     * estado legitimo, e melhor que gravar um palpite.
+     *
+     * <p>A entidade nao confere se a forma aceita o sentido nem se ela esta na
+     * lista da conta: as duas coisas sao chaves compostas no banco, e um
+     * {@code if} aqui seria uma segunda verdade sobre dados que esta classe nao
+     * enxerga (a lista pertence a conta, o sentido a tabela de referencia).</p>
+     */
+    public void pagarPor(FormaPagamento forma)  { this.formaPagamento = forma; }
+
+    /**
+     * Amarra este lancamento a outra perna da transferencia.
+     *
+     * <p>Chamado duas vezes ao criar uma transferencia, uma de cada lado. Quem
+     * orquestra e {@code TransferenciaServico}, que e o unico lugar do sistema
+     * autorizado a criar um par — a T-08 nao cria transferencia perna a perna
+     * justamente porque a primeira perna sozinha ja e um saldo errado.</p>
+     */
+    public void emparelharCom(UUID outroLancamentoId) {
+        if (id != null && id.equals(outroLancamentoId)) {
+            throw new OperacaoNaoPermitida("Um lancamento nao e par de si mesmo");
+        }
+        this.lancamentoParId = outroLancamentoId;
+    }
+
+    /** Faz parte de uma transferencia? */
+    public boolean ehPernaDeTransferencia() {
+        return lancamentoParId != null;
+    }
+
     public void atribuirA(UUID responsavelId)   { this.responsavelId = responsavelId; }
     public void moverPara(UUID contaId)         { this.contaId = Objects.requireNonNull(contaId); }
 
@@ -272,6 +341,8 @@ public class Lancamento {
     public BigDecimal getValor()                { return valor; }
     public String getDescricao()                { return descricao; }
     public String getObservacao()               { return observacao; }
+    public FormaPagamento getFormaPagamento()   { return formaPagamento; }
+    public UUID getLancamentoParId()            { return lancamentoParId; }
     public LocalDate getDataCompetencia()       { return dataCompetencia; }
     public LocalDate getDataCaixa()             { return dataCaixa; }
     public UUID getCriadoPor()                  { return criadoPor; }
