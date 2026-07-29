@@ -669,3 +669,37 @@ code {
     padding-left: 1rem;
     border-left: 2px solid var(--borda);
 }
+
+/* O agrupamento por banco (B-D66). É como ele pensa: primeiro de qual banco,
+   depois qual cartão, depois quais plásticos. A hierarquia da tela é a mesma do
+   modelo — conta › contrato › emitidos. */
+.grupo-banco { margin-top: 1.25rem; }
+
+.nome-banco {
+    font-size: .85rem;
+    font-weight: 600;
+    color: var(--texto-fraco);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin: 0 0 .25rem;
+    padding-bottom: .25rem;
+    border-bottom: 1px solid var(--borda);
+}
+
+/* Os emitidos ficam um por linha, recuados, e não como etiquetas soltas: cada
+   um tem botão próprio, e etiqueta com botão dentro vira alvo pequeno demais. */
+.lista-emitidos {
+    list-style: none;
+    margin: .25rem 0 0 1.4rem;
+    padding: 0;
+    font-size: .78rem;
+}
+
+.lista-emitidos > li {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .15rem 0;
+}
+
+.lista-emitidos > li.arquivada { opacity: .5; }

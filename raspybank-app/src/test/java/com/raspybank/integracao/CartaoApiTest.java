@@ -23,6 +23,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -437,12 +438,42 @@ class CartaoApiTest extends IntegracaoTest {
 
     @Test
     @Order(18)
-    @DisplayName("Encerrar cartao com divida responde 409 e diz quanto")
-    void encerrarComDividaConflita() {
-        ResponseEntity<Map> r = post("/api/cartoes/" + cartaoId + "/encerrar", Map.of());
+    @DisplayName("Encerrar cartao COM divida e permitido — e cancela os emitidos junto (B-D65)")
+    void encerrarComDividaEPermitido() {
+        // A primeira versao copiou a regra de F7 (conta com saldo nao encerra) e
+        // estava errada. Encerrar um cartao nao perdoa a fatura: as parcelas
+        // futuras continuam chegando e as faturas continuam pagaveis. O que
+        // encerrar faz e uma coisa so — impedir compra nova.
+        Map<String, Object> antes = cartaoAtual();
+        assertNotEquals("0.00", antes.get("limiteConsumido"), "O cenario tem divida");
 
-        assertEquals(HttpStatus.CONFLICT, r.getStatusCode());
-        assertTrue(String.valueOf(r.getBody().get("erro")).toLowerCase().contains("divida"));
+        ResponseEntity<Map> r = post("/api/cartoes/" + cartaoId + "/encerrar", Map.of());
+        assertEquals(HttpStatus.OK, r.getStatusCode());
+        assertNotNull(r.getBody().get("encerradoEm"));
+
+        // A cascata: nenhum emitido sobrevive ao encerramento do contrato.
+        List<Map<String, Object>> emitidos =
+            (List<Map<String, Object>>) r.getBody().get("emitidos");
+        assertTrue(emitidos.stream().allMatch(e -> e.get("canceladoEm") != null),
+            "Encerrar o contrato cancela todos os plasticos e virtuais: " + emitidos);
+
+        // E a divida continua inteira — encerrar nao muda numero nenhum.
+        assertEquals(antes.get("limiteConsumido"), r.getBody().get("limiteConsumido"));
+    }
+
+    @Test
+    @Order(18)
+    @DisplayName("Cartao encerrado nao recebe compra nova")
+    void encerradoNaoRecebeCompra() {
+        ResponseEntity<Map> r = post("/api/lancamentos", Map.of(
+            "contaId", nubankId,
+            "cartaoEmitidoId", fisicoId,
+            "categoriaId", mercadoId,
+            "valor", "10.00",
+            "dataCaixa", LocalDate.now().toString()));
+
+        assertEquals(HttpStatus.FORBIDDEN, r.getStatusCode());
+        assertTrue(String.valueOf(r.getBody().get("erro")).toLowerCase().contains("cancelado"));
     }
 
     @Test

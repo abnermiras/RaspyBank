@@ -236,33 +236,62 @@ public class CartaoServico {
     }
 
     /**
-     * Encerra o cartao. Recusa com <b>409</b> se ainda houver divida.
+     * Encerra o cartao e, em cascata, TODOS os emitidos dele.
      *
-     * <p>Mesma logica de F7 para conta: encerrar com saldo faria o patrimonio
-     * subir sem que nenhum pagamento tivesse sido registrado. A checagem olha o
-     * saldo COM previstos, e nao so o realizado — parcela futura e divida
-     * contratada, nao agenda.</p>
+     * <h4>Encerrar NAO exige divida zero — e a diferenca em relacao a conta</h4>
+     *
+     * <p>A primeira versao copiou a regra de F7, que exige saldo zero para
+     * encerrar uma conta. Estava errado, e o Abner corrigiu: <i>"o fato de eu
+     * encerrar um cartao nao some com o futuro e nem anula ele, a
+     * responsabilidade de pagar as faturas em aberto e as dividas futuras
+     * continua"</i>.</p>
+     *
+     * <p>E o mundo real: cancelar o cartao no aplicativo do banco nao perdoa a
+     * fatura. O paralelo com conta nao valia — encerrar uma conta COM saldo faria
+     * dinheiro sumir do patrimonio, enquanto encerrar um cartao com divida nao
+     * muda numero nenhum. A divida continua inteira, as parcelas futuras
+     * continuam chegando, e as faturas continuam pagaveis.</p>
+     *
+     * <p>O que encerrar faz e uma coisa so: <b>impedir compra nova</b>. O cartao
+     * some da lista de meios de pagamento, e e isso.</p>
+     *
+     * <h4>A cascata</h4>
+     *
+     * <p>Encerrar o contrato cancela todos os plasticos e virtuais debaixo dele
+     * (B-D65). Nao ha cartao emitido de um contrato encerrado: o banco cancela o
+     * conjunto, nao a capa.</p>
      */
     @Transactional
     public Cartao encerrar(UUID ambienteId, UUID cartaoId) {
         Cartao c = exigir(ambienteId, cartaoId);
+        OffsetDateTime agora = OffsetDateTime.now();
 
-        SaldoDaConta saldo = lancamentos.saldos(List.of(cartaoId)).stream()
-            .findFirst()
-            .orElseGet(() -> SaldoDaConta.zeradoPara(cartaoId));
+        c.encerrar(agora);
 
-        if (saldo.comPrevistos().signum() != 0) {
-            throw new ConflitoDeEstado(
-                "Cartao com divida de " + saldo.comPrevistos().abs().toPlainString()
-                    + " (incluindo parcelas futuras) nao pode ser encerrado."
-                    + " Pague as faturas em aberto antes.");
+        for (CartaoEmitido e : emitidos.findByCartaoIdOrderByCriadoEm(cartaoId)) {
+            if (!e.estaCancelado()) {
+                e.cancelar(agora);
+            }
         }
 
-        c.encerrar(OffsetDateTime.now());
-        contas.findById(cartaoId).ifPresent(conta -> conta.encerrar(OffsetDateTime.now()));
+        // A conta do cartao NAO e encerrada junto, e isso e deliberado: conta
+        // encerrada com saldo seria o defeito que F7 evita, e a divida do cartao
+        // continua existindo. O que impede compra nova e o encerrado_em do
+        // cartao, nao o da conta.
         return c;
     }
 
+    /**
+     * Reabre o contrato — e NAO reativa os emitidos.
+     *
+     * <p>Poderia descascatear o encerramento, e nao faz de proposito: reativar
+     * em massa ressuscitaria um virtual que a pessoa matou de proposito antes,
+     * e cartao virtual e feito para ser descartado. Ressuscitar em silencio e
+     * pior do que um clique a mais.</p>
+     *
+     * <p>A tela mostra cada emitido com o proprio botao, e diz que eles
+     * continuam cancelados.</p>
+     */
     @Transactional
     public Cartao reabrir(UUID ambienteId, UUID cartaoId) {
         Cartao c = exigir(ambienteId, cartaoId);

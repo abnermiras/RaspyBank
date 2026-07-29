@@ -28,12 +28,25 @@ import {
 // vencida. É esta tela que compõe o rótulo a partir deles — o servidor não
 // escolhe, porque uma fatura ABERTA pode estar parcialmente paga (antecipação
 // para liberar limite) e num enum único esse caso não teria nome.
+//
+// O AGRUPAMENTO É POR BANCO, e a razão é como ele pensa: "quando penso em
+// cartão de crédito primeiro eu penso de qual banco, depois no cartão principal
+// e depois nos adicionais ou virtuais". A tela segue essa ordem — banco,
+// contrato, plásticos —, que é a mesma do modelo (B-D46).
+//
+// ENCERRAR NÃO EXIGE DÍVIDA ZERO (B-D65). Encerrar um cartão não perdoa a
+// fatura: as parcelas futuras continuam chegando e as faturas continuam
+// pagáveis. O que encerrar faz é uma coisa só — impedir compra nova.
 // =============================================================================
 
 const HOJE = new Date()
 
 export default function Cartoes() {
-  const buscar = useCallback(() => apiCartoes.listar(false), [])
+  const [incluirEncerrados, setIncluirEncerrados] = useState(false)
+  const buscar = useCallback(
+    () => apiCartoes.listar(incluirEncerrados),
+    [incluirEncerrados],
+  )
   const { dados, carregando, erro, recarregar } = useCarregar(buscar)
 
   const [aviso, setAviso] = useState(null)
@@ -77,6 +90,16 @@ export default function Cartoes() {
 
   const lista = dados?.cartoes ?? []
 
+  // Banco → contratos daquele banco. A ordem dentro do grupo é a que o servidor
+  // devolveu (por nome), e a dos grupos é a do primeiro cartão de cada um —
+  // reordenar aqui faria a tela mudar de arrumação entre duas chamadas iguais.
+  const porBanco = [
+    ...lista.reduce((mapa, c) => {
+      const chave = c.banco?.id ?? 'sem-banco'
+      return mapa.set(chave, [...(mapa.get(chave) ?? []), c])
+    }, new Map()),
+  ]
+
   // Só conta de banco vira cartão: papel moeda não emite crédito (B-D45). A
   // tela já filtra para não oferecer o que o servidor recusa com 403.
   const contasDeBanco = apoio.contas.filter(
@@ -87,6 +110,14 @@ export default function Cartoes() {
     <section className="painel">
       <header className="cabecalho-painel">
         <h2>Cartões de crédito</h2>
+        <label className="alternador">
+          <input
+            type="checkbox"
+            checked={incluirEncerrados}
+            onChange={(e) => setIncluirEncerrados(e.target.checked)}
+          />
+          Mostrar encerrados
+        </label>
         <button
           type="button" className="botao-principal botao-pequeno"
           onClick={() => setAbrindo(true)}
@@ -128,65 +159,83 @@ export default function Cartoes() {
         </p>
       )}
 
-      <ul className="lista-cartoes">
-        {lista.map((cartao) => (
-          <li key={cartao.id}>
-            <LinhaDeCartao
-              cartao={cartao}
-              aberto={selecionado === cartao.id}
-              ocupado={ocupado}
-              aoAlternar={() =>
-                setSelecionado(selecionado === cartao.id ? null : cartao.id)
-              }
-              aoNovoVirtual={() => setEmitindo(cartao)}
-              aoEncerrar={() =>
-                executar(
-                  () =>
-                    cartao.encerradoEm
-                      ? apiCartoes.reabrir(cartao.id)
-                      : apiCartoes.encerrar(cartao.id),
-                  cartao.encerradoEm
-                    ? `Cartão "${cartao.nome}" reaberto.`
-                    : `Cartão "${cartao.nome}" encerrado — ele some dos meios de pagamento.`,
-                )
-              }
-            />
+      {porBanco.map(([bancoId, doBanco]) => (
+        <section key={bancoId} className="grupo-banco">
+          <h3 className="nome-banco">{doBanco[0].banco?.nome}</h3>
 
-            {emitindo?.id === cartao.id && (
-              <FormularioDeVirtual
-                cartao={cartao}
-                ocupado={ocupado}
-                aoCancelar={() => setEmitindo(null)}
-                aoGravar={async (corpo) => {
-                  const deu = await executar(
-                    () => apiCartoes.emitir(cartao.id, corpo),
-                    `Cartão ····${corpo.finalDoCartao} criado.`,
-                  )
-                  if (deu) setEmitindo(null)
-                }}
-              />
-            )}
+          <ul className="lista-cartoes">
+            {doBanco.map((cartao) => (
+              <li key={cartao.id} className={cartao.encerradoEm ? 'arquivada' : undefined}>
+                <LinhaDeCartao
+                  cartao={cartao}
+                  aberto={selecionado === cartao.id}
+                  ocupado={ocupado}
+                  aoAlternar={() =>
+                    setSelecionado(selecionado === cartao.id ? null : cartao.id)
+                  }
+                  aoNovoVirtual={() => setEmitindo(cartao)}
+                  aoEncerrar={() =>
+                    executar(
+                      () =>
+                        cartao.encerradoEm
+                          ? apiCartoes.reabrir(cartao.id)
+                          : apiCartoes.encerrar(cartao.id),
+                      cartao.encerradoEm
+                        ? `Cartão "${cartao.nome}" reaberto — os cartões emitidos continuam cancelados.`
+                        : `Cartão "${cartao.nome}" encerrado, com todos os emitidos. As faturas em aberto continuam a pagar.`,
+                    )
+                  }
+                  aoAlternarEmitido={(emitido) =>
+                    executar(
+                      () =>
+                        emitido.canceladoEm
+                          ? apiCartoes.reativarEmitido(cartao.id, emitido.id)
+                          : apiCartoes.cancelarEmitido(cartao.id, emitido.id),
+                      emitido.canceladoEm
+                        ? `····${emitido.finalDoCartao} reativado.`
+                        : `····${emitido.finalDoCartao} cancelado.`,
+                    )
+                  }
+                />
 
-            {selecionado === cartao.id && (
-              <PainelDeFaturas
-                cartao={cartao}
-                contas={apoio.contas}
-                formas={apoio.formas}
-                ocupado={ocupado}
-                aoMudar={recarregar}
-                aoAvisar={setAviso}
-              />
-            )}
-          </li>
-        ))}
-      </ul>
+                {emitindo?.id === cartao.id && (
+                  <FormularioDeVirtual
+                    cartao={cartao}
+                    ocupado={ocupado}
+                    aoCancelar={() => setEmitindo(null)}
+                    aoGravar={async (corpo) => {
+                      const deu = await executar(
+                        () => apiCartoes.emitir(cartao.id, corpo),
+                        `Cartão ····${corpo.finalDoCartao} criado.`,
+                      )
+                      if (deu) setEmitindo(null)
+                    }}
+                  />
+                )}
+
+                {selecionado === cartao.id && (
+                  <PainelDeFaturas
+                    cartao={cartao}
+                    contas={apoio.contas}
+                    formas={apoio.formas}
+                    ocupado={ocupado}
+                    aoMudar={recarregar}
+                    aoAvisar={setAviso}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+
     </section>
   )
 }
 
 // ----------------------------------------------------------------------------
 
-function LinhaDeCartao({ cartao, aberto, ocupado, aoAlternar, aoEncerrar, aoNovoVirtual }) {
+function LinhaDeCartao({ cartao, aberto, ocupado, aoAlternar, aoEncerrar, aoNovoVirtual, aoAlternarEmitido }) {
   // Pode ser negativo, e isso é informação: o limite estourou. O sistema não
   // trava (B-D48) — quem recusa a compra é o banco de verdade.
   const estourou = Number(cartao.limiteDisponivel) < 0
@@ -202,35 +251,54 @@ function LinhaDeCartao({ cartao, aberto, ocupado, aoAlternar, aoEncerrar, aoNovo
           <span className="seta">{aberto ? '▾' : '▸'}</span>
           <span className="nome-recurso">{cartao.nome}</span>
         </button>
-        <span className="etiqueta etiqueta-fraca">{cartao.banco?.nome}</span>
         <span className="etiqueta etiqueta-fraca" title="Dia do vencimento da fatura">
           vence dia {cartao.diaVencimento}
         </span>
         {cartao.encerradoEm && <span className="etiqueta etiqueta-fraca">encerrado</span>}
 
-        <span className="formas-da-conta">
-          {(cartao.emitidos ?? []).length === 0 && (
-            <span className="texto-fraco">
-              sem cartão emitido — ele não aparece em "como foi pago" até você criar um
-            </span>
-          )}
-          {(cartao.emitidos ?? []).map((e) => (
-            <span
-              key={e.id}
-              className={`etiqueta etiqueta-fraca${e.canceladoEm ? ' arquivada' : ''}`}
-              title={`${e.tipo === 'FISICO' ? 'Físico' : 'Virtual'} · final ${e.finalDoCartao}`}
-            >
-              {e.nomeTitular} ····{e.finalDoCartao}
-            </span>
-          ))}
-        </span>
       </div>
 
+      {/* Os plásticos e virtuais, cada um com o próprio botão. Encerrar o
+          contrato cancela todos (B-D65), mas cancelar um virtual descartado
+          não deveria exigir matar o cartão inteiro. */}
+      <ul className="lista-emitidos">
+        {(cartao.emitidos ?? []).length === 0 && (
+          <li className="texto-fraco">
+            sem cartão emitido — ele não aparece em "como foi pago" até você criar um
+          </li>
+        )}
+        {(cartao.emitidos ?? []).map((e) => (
+          <li key={e.id} className={e.canceladoEm ? 'arquivada' : undefined}>
+            <span className="nome-recurso">{e.nomeTitular}</span>
+            <span className="texto-fraco">
+              {' '}{e.tipo === 'FISICO' ? 'físico' : 'virtual'} ····{e.finalDoCartao}
+            </span>
+            {e.canceladoEm && <span className="etiqueta etiqueta-fraca">cancelado</span>}
+            <button
+              type="button" className="botao-texto"
+              onClick={() => aoAlternarEmitido(e)}
+              disabled={ocupado}
+            >
+              {e.canceladoEm ? 'Reativar' : 'Cancelar'}
+            </button>
+          </li>
+        ))}
+      </ul>
+
       <div className="acoes-linha">
-        <button type="button" className="botao-texto" onClick={aoNovoVirtual} disabled={ocupado}>
-          Novo cartão
-        </button>
-        <button type="button" className="botao-texto" onClick={aoEncerrar} disabled={ocupado}>
+        {!cartao.encerradoEm && (
+          <button type="button" className="botao-texto" onClick={aoNovoVirtual} disabled={ocupado}>
+            Novo cartão
+          </button>
+        )}
+        <button
+          type="button" className="botao-texto" onClick={aoEncerrar} disabled={ocupado}
+          title={
+            cartao.encerradoEm
+              ? 'Reabre o contrato. Os cartões emitidos continuam cancelados — reative um a um.'
+              : 'Cancela todos os cartões emitidos e impede compra nova. As faturas em aberto continuam a pagar.'
+          }
+        >
           {cartao.encerradoEm ? 'Reabrir' : 'Encerrar'}
         </button>
       </div>

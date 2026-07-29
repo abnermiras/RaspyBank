@@ -411,3 +411,21 @@ A escolha de qual número mostrar no extrato veio dele: **o banco**. Ter escolhi
 É o terceiro caso nesta semana em que uma regra virada impossibilidade estrutural encontrou algo que os testes não tinham encontrado.
 
 **Verificado em 28/07/2026:** 200 testes verdes. V13 aplicada no banco real em 12 ms, e o fluxo novo conferido por HTTP: cartão físico nascendo com o contrato, virtual dividindo limite e fatura, três compras com donos diferentes aparecendo separadas no extrato da fatura, o cartão fora da lista de contas, e um cartão do Nubank lançado na Carteira recusado com 403.
+
+### Ajustes da tela de cartões (28/07/2026)
+
+Três pontos, e o terceiro derrubou uma decisão que eu tinha tomado por analogia errada.
+
+**Agrupamento por banco** (B-D66). A tela passou a ser **banco → contrato → emitidos**, que é a hierarquia do modelo e também a ordem em que ele pensa. O banco saiu de etiqueta na linha e virou cabeçalho de grupo.
+
+**Cada cartão emitido tem botão próprio** de cancelar e reativar. Cancelar um virtual descartado não deveria exigir encerrar o contrato inteiro.
+
+**Encerrar não exige dívida zero** (B-D65). Eu tinha copiado F7 — conta com saldo não encerra — e o paralelo não valia. Encerrar uma **conta** com saldo faria dinheiro sumir do patrimônio; encerrar um **cartão** com dívida não muda número nenhum: as parcelas futuras continuam chegando e as faturas continuam pagáveis.
+
+Encerrar faz uma coisa só: **impede compra nova**. Em cascata, cancela todos os emitidos — o banco cancela o conjunto, não a capa.
+
+**Reabrir não reativa os emitidos**, e isso é escolha: ressuscitar em massa devolveria à vida um virtual que a pessoa matou de propósito, e virtual existe para ser descartado. Cada um volta pelo próprio botão.
+
+A tela ganhou "Mostrar encerrados", porque um cartão encerrado precisa continuar acessível — a fatura dele ainda se paga.
+
+**Verificado em 28/07/2026:** 201 testes verdes, com dois novos guardando que encerrar com dívida é permitido, que a cascata cancela todos os emitidos e que cartão encerrado recusa compra nova.
