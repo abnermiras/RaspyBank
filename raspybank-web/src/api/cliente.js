@@ -38,29 +38,75 @@ export async function pedir(caminho, opcoes = {}) {
 }
 
 /**
+ * A renovação em voo, compartilhada por todo mundo que precisar dela.
+ *
+ * O token de renovação é ROTATIVO (A11): cada uso o consome e gera outro. Sem
+ * esta variável, três chamadas paralelas que levam 401 ao mesmo tempo disparam
+ * TRÊS renovações com o mesmo token — a primeira o consome e as outras duas
+ * chegam apresentando um token já usado.
+ *
+ * Do ponto de vista do servidor isso é indistinguível de roubo, e ele faz o que
+ * deve: revoga a família inteira. O efeito é ser deslogado de todos os
+ * dispositivos sem ninguém ter atacado nada.
+ *
+ * Reproduzido contra o servidor real em 28/07/2026: três renovações em paralelo
+ * com o mesmo token deram 200, 401 e 401, e a família ficou revogada. A tela de
+ * lançamentos dispara exatamente três chamadas num `Promise.all`.
+ *
+ * A promessa é guardada e não o resultado, de propósito: quem chegar durante a
+ * renovação espera a MESMA, em vez de começar outra. É o mesmo padrão do cache
+ * de `formasPagamento`.
+ */
+let renovacaoEmVoo = null
+
+function renovar() {
+  if (!renovacaoEmVoo) {
+    renovacaoEmVoo = pedir('/api/auth/renovar', {
+      metodo: 'POST',
+      // O ambienteId vai junto por causa do I-15: sem ele a sessão renovada
+      // voltaria ao primeiro ambiente e o seletor "pularia" sozinho.
+      corpo: { tokenRenovacao: tokenRenovacao(), ambienteId: ambienteAtual() },
+    })
+      .then((resposta) => {
+        if (resposta.ok) guardarSessao(resposta.corpo)
+        return resposta
+      })
+      // Liberar SEMPRE, inclusive em falha de rede: deixar a promessa presa
+      // faria toda chamada seguinte esperar por uma renovação que nunca volta.
+      .finally(() => {
+        renovacaoEmVoo = null
+      })
+  }
+  return renovacaoEmVoo
+}
+
+/**
  * Chamada autenticada com renovação transparente.
  *
  * O 401 por token expirado não deve devolver a pessoa ao login: tenta-se uma
- * renovação e repete-se a chamada. É aqui que o contrato do I-15 aparece — o
- * ambienteId vai junto, senão a sessão renovada voltaria ao primeiro ambiente
- * e o seletor "pularia" sozinho.
- *
- * A repetição acontece no máximo uma vez. Se o 401 persistir depois de uma
- * renovação bem-sucedida, o problema não é o token, e insistir viraria laço.
+ * renovação e repete-se a chamada. A repetição acontece no máximo uma vez — se
+ * o 401 persistir depois de uma renovação bem-sucedida, o problema não é o
+ * token, e insistir viraria laço.
  */
 export async function pedirComRenovacao(caminho, opcoes = {}) {
   const autenticado = { ...opcoes, autenticado: true }
 
+  // Guardado ANTES de sair: é ele que diz, no retorno, se alguém já renovou
+  // enquanto esta chamada estava no ar.
+  const tokenUsado = tokenAcesso()
+
   const primeira = await pedir(caminho, autenticado)
   if (primeira.status !== 401) return primeira
 
-  const renovacao = await pedir('/api/auth/renovar', {
-    metodo: 'POST',
-    corpo: { tokenRenovacao: tokenRenovacao(), ambienteId: ambienteAtual() },
-  })
+  // Outra chamada já renovou enquanto esta viajava. Renovar de novo consumiria
+  // um token que acabou de nascer, sem necessidade — basta repetir com o novo.
+  if (tokenAcesso() !== tokenUsado) {
+    return pedir(caminho, autenticado)
+  }
+
+  const renovacao = await renovar()
   if (!renovacao.ok) return primeira // a sessão acabou de verdade
 
-  guardarSessao(renovacao.corpo)
   return pedir(caminho, autenticado)
 }
 

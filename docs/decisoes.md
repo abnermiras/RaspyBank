@@ -250,6 +250,18 @@ Oito pontos que o uso real da V12 devolveu. Quatro deles — 3, 5, 7 e 8 da list
 
 `ck_lancamento_cartao_exige_fatura` pegou um defeito **da V12** no primeiro parcelamento: as parcelas 2..N eram gravadas antes de receber a fatura. Passou despercebido enquanto o cartão não existia na linha; a constraint nova o expôs no mesmo dia. Corrigido invertendo a ordem — fatura antes do `save`.
 
+# 4h. Renovação concorrente de token (28/07/2026)
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D67 | **Uma renovação de token em voo por vez**, compartilhada por todas as chamadas que precisarem dela | O token de renovação é rotativo (A11): cada uso o consome. As telas disparam chamadas em paralelo — a T-08 faz um `Promise.all` de três — e, sem coordenação, as três renovavam com o MESMO token. A primeira o consumia e as outras chegavam apresentando um token já usado; o servidor, que não distingue reuso legítimo de roubo, revogava a família inteira e deslogava de todos os dispositivos. **A segurança estava certa; o cliente é que estava errado.** Reproduzido contra o servidor real: três renovações paralelas deram 200, 401 e 401, com a família revogada |
+| B-D68 | **Se o token já mudou enquanto a chamada estava no ar, não se renova — repete-se** | Consequência do anterior, e barata: uma chamada que levou 401 por causa do token velho não precisa de renovação nenhuma se outra já renovou. Sem esta guarda, sobraria uma renovação inútil por rajada, consumindo um token que acabou de nascer |
+| B-D69 | **O frontend ganhou testes, e SEM framework**: Node puro, `node:assert`, dublês de `localStorage` e `fetch` em vinte linhas. Alvo `make web-test` | Trazer vitest ou jest custaria dezenas de pacotes, e a regra de dependências (mapa-telas §7) existe para que cada pacote seja uma decisão — um defeito não justifica uma árvore. O teste **foi conferido contra o código antigo** e falha nele: sem isso, seria um teste que não prova nada. Quando o frontend tiver muitos testes, a conta muda e a decisão se revisita |
+
+## O que este teste ainda não alcança
+
+Ele exercita o módulo, não o navegador. A validação de formulário do HTML — que já escondeu um defeito real, o `pattern` do cartão com escape de JSX — continua fora do alcance de qualquer teste que não abra uma página de verdade.
+
 # 5. Revisões registradas (R1–R6, sessão de requisitos)
 
 Decisões que substituíram decisões anteriores durante o próprio processo. O motivo da mudança é tão importante quanto a decisão final.

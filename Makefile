@@ -22,7 +22,7 @@ COMPOSE_PI    = docker compose --env-file .env -f infra/compose.yaml -f infra/co
 -include .env
 
 .DEFAULT_GOAL := help
-.PHONY: help up down restart logs ps psql psql-app db-reset db-dump tools tools-down check-env build test arch app gate diag web web-build web-deps web-audit
+.PHONY: help up down restart logs ps psql psql-app db-reset db-dump tools tools-down check-env build test arch app gate diag web web-build web-deps web-audit web-test
 
 # Data de corte das dependências do frontend. REGRA: nada publicado há menos de
 # uma semana entra no projeto. O padrão de ataque de cadeia de suprimentos no
@@ -164,3 +164,12 @@ web-deps: ## Instala as dependências do frontend a partir do lock, sem rodar sc
 
 web-audit: ## Mostra as falhas conhecidas nas dependências do frontend
 	@cd raspybank-web && npm audit || true
+
+# Sem framework de teste, e isso é decisão: o Node já roda ESM e já traz assert,
+# e os dublês de localStorage e fetch cabem em vinte linhas. Trazer vitest ou
+# jest custaria dezenas de pacotes novos, e a regra do NPM_CORTE existe para que
+# cada pacote seja uma decisão — um defeito não justifica uma árvore.
+web-test: ## Roda os testes do frontend (Node puro, sem dependência nova)
+	@for teste in raspybank-web/testes/*.mjs; do \
+		node "$$teste" || exit 1; \
+	done

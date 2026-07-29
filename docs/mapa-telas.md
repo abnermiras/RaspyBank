@@ -429,3 +429,33 @@ Encerrar faz uma coisa só: **impede compra nova**. Em cascata, cancela todos os
 A tela ganhou "Mostrar encerrados", porque um cartão encerrado precisa continuar acessível — a fatura dele ainda se paga.
 
 **Verificado em 28/07/2026:** 201 testes verdes, com dois novos guardando que encerrar com dívida é permitido, que a cascata cancela todos os emitidos e que cartão encerrado recusa compra nova.
+
+## 13. Renovação concorrente de token (28/07/2026)
+
+Um WARN que o Abner notou no log virou o primeiro teste automatizado do frontend.
+
+```
+WARN  Reuso de token de renovacao detectado: familia ... revogada.
+```
+
+Decisões em `decisoes.md` §4h (B-D67 a B-D69).
+
+### O diagnóstico, provado antes de consertar
+
+O token de renovação é rotativo (A11): cada uso o consome. As telas disparam chamadas em paralelo — a T-08 faz um `Promise.all` de contas, categorias e cartões. Quando o token de acesso vence, **as três levam 401 ao mesmo tempo** e cada uma disparava a própria renovação com o mesmo token.
+
+Reproduzido contra o servidor real antes de tocar no código: três renovações paralelas responderam **200, 401 e 401**, e a família ficou revogada. O efeito para quem usa é ser deslogado de todos os dispositivos sem ninguém ter atacado nada — tipicamente ao voltar a uma aba parada por mais de quinze minutos.
+
+**A segurança estava certa. O cliente é que estava errado.**
+
+### A correção
+
+Uma renovação em voo por vez, compartilhada — o mesmo padrão do cache de `formasPagamento`. Mais uma guarda barata: se o token já mudou enquanto a chamada estava no ar, ela nem renova, só repete.
+
+### O primeiro teste do frontend, e sem framework
+
+`make web-test`, Node puro. Nenhum pacote novo: o Node já roda ESM e já traz `assert`, e os dublês de `localStorage` e `fetch` cabem em vinte linhas. Trazer vitest custaria dezenas de dependências, e a regra do `NPM_CORTE` existe para que cada uma seja uma decisão.
+
+**O teste foi conferido contra o código antigo e falha nele** — três renovações em vez de uma. Um teste de regressão que não reprova a versão com o defeito não prova nada.
+
+Ele ainda não alcança o navegador: a validação de formulário do HTML, que já escondeu o `pattern` do cartão, continua fora do alcance de qualquer teste que não abra uma página de verdade.
