@@ -77,7 +77,7 @@ public class SegurancaConfig {
                     "/mapa",
                     "/lancamentos",
                     "/categorias",
-                    "/contas", "/cartoes").permitAll()
+                    "/contas", "/cartoes", "/perfil").permitAll()
 
                 // ATENCAO — unico curinga do arquivo, e ele e deliberado.
                 //

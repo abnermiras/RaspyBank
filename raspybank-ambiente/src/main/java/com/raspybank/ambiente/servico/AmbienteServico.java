@@ -57,6 +57,31 @@ public class AmbienteServico {
      * <p>Depende do Row Level Security estar com a identidade definida: sem
      * isso devolve lista vazia, que e o comportamento seguro.</p>
      */
+    /**
+     * Cria um ambiente ADICIONAL, escolhido por quem esta logado.
+     *
+     * <p>Passa pela porta estreita {@code app_criar_ambiente} (V14) pelo mesmo
+     * impasse de {@code app_criar_conta}: {@code pol_ambiente_vinculado}
+     * pergunta se o ambiente esta entre os do usuario, e para um que esta
+     * nascendo a resposta e sempre NAO. Nenhuma ordem de INSERT resolve.</p>
+     *
+     * <p>Diferente de {@link #criarInicial}, que e chamada no cadastro e recusa
+     * se o usuario ja tiver ambiente (A12), esta existe justamente para o
+     * segundo em diante. A identidade vem da sessao, nao de parametro.</p>
+     */
+    @Transactional
+    public UUID criar(String nome) {
+        UUID id = (UUID) em.createNativeQuery("SELECT app_criar_ambiente(:nome)")
+            .setParameter("nome", nome)
+            .getSingleResult();
+
+        // O flush explicito faz a funcao rodar AGORA. Sem ele o Hibernate
+        // poderia adiar a consulta nativa, e quem ler a lista logo depois nao
+        // encontraria o ambiente recem-criado.
+        em.flush();
+        return id;
+    }
+
     @Transactional(readOnly = true)
     public List<Ambiente> listarDoUsuario() {
         return ambientes.findAll();

@@ -94,6 +94,20 @@ public class Usuario {
     // A ausencia deste construtor e a documentacao executavel dessa regra:
     // quem tentar `new Usuario(...)` nao compila, e vem ler este comentario.
 
+    /**
+     * Troca o nome de exibicao.
+     *
+     * <p>O e-mail nao tem par disto, e a ausencia e decisao: ele e o login.
+     * Enquanto nao existir recuperacao de senha, um e-mail digitado errado
+     * trancaria a pessoa para fora da propria conta sem volta.</p>
+     */
+    public void renomear(String novoNome) {
+        if (novoNome == null || novoNome.isBlank()) {
+            throw new IllegalArgumentException("nome e obrigatorio");
+        }
+        this.nome = novoNome.trim();
+    }
+
     public UUID getId()                     { return id; }
     public String getNome()                 { return nome; }
     public String getEmail()                { return email; }

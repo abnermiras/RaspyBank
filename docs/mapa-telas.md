@@ -459,3 +459,37 @@ Uma renovação em voo por vez, compartilhada — o mesmo padrão do cache de `f
 **O teste foi conferido contra o código antigo e falha nele** — três renovações em vez de uma. Um teste de regressão que não reprova a versão com o defeito não prova nada.
 
 Ele ainda não alcança o navegador: a validação de formulário do HTML, que já escondeu o `pattern` do cartão, continua fora do alcance de qualquer teste que não abra uma página de verdade.
+
+## 14. T-09 — Perfil e ambientes (29/07/2026)
+
+Nasceu de um beco que o uso revelou: **o seletor de ambiente da casca ficava desabilitado com um ambiente só, e não havia como criar o segundo.** A lista existia; a porta não.
+
+Decisões em `decisoes.md` §4i (B-D70 a B-D73).
+
+### Escopo cortado por ele, no meio da própria descrição
+
+O pedido original incluía apagar ambiente e apagar conta, com aviso crítico, senha e digitação do nome. Ao ver o tamanho — todas as cinco chaves estrangeiras que apontam para `ambiente` são `RESTRICT`, então apagar é uma demolição em ordem, e um ambiente compartilhado apagado levaria junto os dados de outra pessoa — ele parou: *"ficou complexo e eu preciso pensar... vamos fazer o básico depois a gente evolui"*.
+
+Ficou: ver os dados, trocar o nome, trocar a senha, criar ambiente. **Compartilhamento aparece na tela desabilitado**, com o lugar marcado para a conversa ter onde cair.
+
+### Três coisas que a tela não faz, e por quê
+
+**O e-mail não se edita** (B-D71). Ele é o login, e sem recuperação de senha um e-mail errado tranca a pessoa para fora sem volta.
+
+**Criar ambiente não troca a sessão.** Quem está no meio de um lançamento na Casa não deveria ser jogado para o ambiente novo sem pedir. A troca continua no seletor do topo.
+
+**Apagar não existe.** O botão ausente é mais honesto que um botão que destrói dados de terceiros sem o desenho pronto.
+
+### O beco que custou uma rodada vermelha
+
+`findById` devolvia vazio para um usuário que existe, e a tela respondia 404 sem nada no log. Causa: o aspecto que injeta a identidade do RLS envolve métodos `@Transactional`, e eu chamei o repositório **direto do controlador** — sem passar por ele, `app_usuario_id()` é nulo e a política não casa com linha nenhuma.
+
+Virou `UsuarioServico`, com o motivo escrito no javadoc. Não é camada por camada: sem o serviço, não funciona.
+
+### Um guarda do projeto pegou meu esquecimento
+
+`MigracoesTest` compara as funções `SECURITY DEFINER` do banco com um inventário e reprovou a build: eu tinha prometido a linha em `security-definer.md` dentro do comentário da própria migração, e não a escrevi.
+
+Achado no caminho: **o inventário mora em dois lugares** — o documento e uma lista codificada no teste. Acrescentar uma função exige tocar nos dois, e o teste só reclama do segundo. Fica como dívida pequena e registrada.
+
+**Verificado em 29/07/2026:** 211 testes verdes, sendo 10 novos em `PerfilApiTest`. V14 aplicada no banco real em 13 ms, e o fluxo conferido por HTTP: perfil com dados, nome trocado sem tocar no e-mail, ambiente "Freelance" criado vazio (0 contas, 4 sistêmicas) sem mudar o ambiente ativo, senha atual errada em 403, e a troca de senha invalidando a antiga.

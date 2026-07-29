@@ -80,6 +80,55 @@ public class AutenticacaoServico {
         return (UUID) id;
     }
 
+    /**
+     * Troca a senha, exigindo a atual.
+     *
+     * <h4>Por que a atual e obrigatoria</h4>
+     *
+     * <p>Sem ela, quem sentasse na maquina com a sessao aberta trocaria a senha
+     * e tomaria a conta — inclusive expulsando o dono, ja que a troca encerra as
+     * outras sessoes. A senha atual e o que prova que quem esta ali e o dono, e
+     * nao alguem que encontrou a tela destravada.</p>
+     *
+     * <h4>UPDATE direto, e nao funcao SECURITY DEFINER</h4>
+     *
+     * <p>A15 diz que a entidade {@code Usuario} nao mapeia {@code senha_hash} —
+     * e o motivo e que a V8 <b>revogou o SELECT</b> daquela coluna, entao mapea-la
+     * faria todo {@code findById} falhar. A ESCRITA continua concedida, e
+     * {@code pol_usuario_proprio} ja limita a linha ao dono
+     * ({@code id = app_usuario_id()}).</p>
+     *
+     * <p>Ou seja: nao ha impasse com a politica aqui, e pelo criterio B-D19 uma
+     * funcao SECURITY DEFINER nova <b>nao se justifica</b>. Uma consulta nativa
+     * de UPDATE resolve, sem SELECT nenhum na coluna proibida.</p>
+     *
+     * <h4>Trocar a senha derruba as outras sessoes</h4>
+     *
+     * <p>E o comportamento esperado de qualquer sistema: se a troca aconteceu
+     * porque a senha vazou, deixar as sessoes antigas vivas manteria o invasor
+     * dentro. Quem trocou continua logado nesta.</p>
+     *
+     * @return {@code false} quando a senha atual nao confere — sem dizer mais
+     *         nada, pelo mesmo motivo do login
+     */
+    @Transactional
+    public boolean trocarSenha(UUID usuarioId, String email, String senhaAtual, String senhaNova) {
+        if (autenticar(email, senhaAtual).filter(usuarioId::equals).isEmpty()) {
+            log.debug("Troca de senha recusada: senha atual incorreta para {}.", usuarioId);
+            return false;
+        }
+
+        em.createNativeQuery("UPDATE usuario SET senha_hash = :hash WHERE id = :id")
+            .setParameter("hash", codificador.encode(senhaNova))
+            .setParameter("id", usuarioId)
+            .executeUpdate();
+
+        encerrarSessoes(usuarioId);
+
+        log.info("Senha trocada para o usuario {}; as demais sessoes foram encerradas.", usuarioId);
+        return true;
+    }
+
     // -------------------------------------------------------------------------
     // Login
     // -------------------------------------------------------------------------

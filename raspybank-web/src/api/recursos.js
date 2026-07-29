@@ -13,6 +13,30 @@ import { pedirComRenovacao } from './cliente.js'
 
 const json = (metodo, corpo) => ({ metodo, corpo })
 
+// ------------------------------------------------------------------- perfil
+export const perfil = {
+  buscar: () => pedirComRenovacao('/api/perfil'),
+
+  alterarNome: (nome) => pedirComRenovacao('/api/perfil/nome', json('PUT', { nome })),
+
+  /**
+   * Exige a senha atual, e derruba as OUTRAS sessões.
+   *
+   * Se a troca aconteceu porque a senha vazou, deixar as antigas vivas manteria
+   * o invasor dentro. Esta sessão continua.
+   */
+  trocarSenha: (senhaAtual, senhaNova) =>
+    pedirComRenovacao('/api/perfil/senha', json('PUT', { senhaAtual, senhaNova })),
+}
+
+// ---------------------------------------------------------------- ambientes
+export const ambientes = {
+  listar: () => pedirComRenovacao('/api/ambientes'),
+
+  /** Nasce vazio — só as sistêmicas (F13). Não troca a sessão para ele. */
+  criar: (nome) => pedirComRenovacao('/api/ambientes', json('POST', { nome })),
+}
+
 // ---------------------------------------------------------------- categorias
 export const categorias = {
   listar: (incluirArquivadas = false) =>

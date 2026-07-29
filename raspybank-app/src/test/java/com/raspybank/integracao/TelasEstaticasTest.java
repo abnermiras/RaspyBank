@@ -77,7 +77,7 @@ class TelasEstaticasTest extends IntegracaoTest {
         // caminho ao servidor. Sem o SpaControlador isto responderia 401 pela
         // regra do anyRequest().authenticated(), e o favorito da pessoa
         // quebraria em silencio.
-        for (String rota : new String[] { "/entrar", "/mapa", "/lancamentos", "/categorias", "/contas", "/cartoes" }) {
+        for (String rota : new String[] { "/entrar", "/mapa", "/lancamentos", "/categorias", "/contas", "/cartoes", "/perfil" }) {
             ResponseEntity<String> resposta = http.getForEntity(rota, String.class);
             assertEquals(HttpStatus.OK, resposta.getStatusCode(),
                 "A rota " + rota + " deveria devolver a SPA");

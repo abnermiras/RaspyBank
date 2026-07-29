@@ -262,6 +262,29 @@ Oito pontos que o uso real da V12 devolveu. Quatro deles — 3, 5, 7 e 8 da list
 
 Ele exercita o módulo, não o navegador. A validação de formulário do HTML — que já escondeu um defeito real, o `pattern` do cartão com escape de JSX — continua fora do alcance de qualquer teste que não abra uma página de verdade.
 
+# 4i. Perfil e ambientes (29/07/2026)
+
+Escopo deliberadamente pequeno: ele cortou o próprio pedido no meio — *"ficou complexo e eu preciso pensar... vamos fazer o básico depois a gente evolui"*. Apagar ambiente e apagar conta ficaram fora.
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D70 | **`app_criar_ambiente(nome)` — a TERCEIRA porta estreita** (V14) | Mesmo impasse de `app_criar_conta` e de `auth_criar_ambiente_inicial`: `pol_ambiente_vinculado` pergunta se o ambiente está entre os do usuário, e para um que está nascendo a resposta é sempre não. Nenhuma ordem de INSERT resolve. **A identidade vem da sessão, não de parâmetro** — com o usuário como argumento, a função viraria "crie um ambiente para fulano". Nasceu de um beco que o uso revelou: o seletor da casca ficava desabilitado com um ambiente só, e não havia como criar o segundo |
+| B-D71 | **O e-mail não se edita.** Só o nome | Ele é o login. Trocá-lo muda a identidade de entrada e, **enquanto não existir recuperação de senha**, um e-mail digitado errado tranca a pessoa para fora da própria conta sem volta. A ausência do campo é a proteção |
+| B-D72 | **Trocar a senha exige a atual e derruba as OUTRAS sessões** | Sem a atual, quem sentasse numa máquina com a sessão aberta tomaria a conta — e o dono ficaria de fora, porque a troca expulsa todo mundo. Derrubar as outras é o comportamento certo pelo motivo oposto: se a troca aconteceu porque a senha vazou, deixar as antigas vivas manteria o invasor dentro |
+| B-D73 | **A troca de senha NÃO ganhou função `SECURITY DEFINER`** | A15 diz que a entidade não mapeia `senha_hash`, e o motivo é que a V8 **revogou o SELECT** — mapear faria todo `findById` falhar. A **escrita** continua concedida, e `pol_usuario_proprio` já limita a linha ao dono. Não há impasse com a política, e pelo critério B-D19 uma função nova não se justifica. Um UPDATE nativo resolve, sem SELECT na coluna proibida |
+
+## O beco que custou uma rodada de teste vermelho
+
+`UsuarioServico` existe por necessidade, não por cerimônia de camada. O aspecto `ConfiguradorSessaoRls` injeta `raspybank.usuario_id` envolvendo métodos `@Transactional`; um repositório chamado **direto do controlador** não passa por ele, `app_usuario_id()` devolve nulo, e `pol_usuario_proprio` não casa com linha nenhuma.
+
+O sintoma é cruel: `findById` devolve vazio para um usuário que existe, e a tela responde **404 sem nada no log**. Está escrito no javadoc da classe para não custar de novo.
+
+## O inventário está em DOIS lugares, e os dois cobram
+
+`MigracoesTest` pegou a função nova ausente do inventário — mas a lista dele é **codificada no próprio teste**, não lida de `docs/security-definer.md`. Então acrescentar uma função `SECURITY DEFINER` exige tocar em dois arquivos, e o teste só reclama do segundo.
+
+Fica registrado como dívida pequena: o teste deveria ler o documento. Enquanto não lê, quem esquecer o documento passa no build.
+
 # 5. Revisões registradas (R1–R6, sessão de requisitos)
 
 Decisões que substituíram decisões anteriores durante o próprio processo. O motivo da mudança é tão importante quanto a decisão final.
@@ -310,3 +333,4 @@ Decisões que substituíram decisões anteriores durante o próprio processo. O 
 | V11 | **Forma de pagamento e transferência** (B-D30 a B-D40): `forma_pagamento` e `forma_pagamento_sentido` (referência); `conta_forma_pagamento` (lista por conta + dois padrões, com RLS e auditoria); `lancamento.forma_pagamento` amarrada por **duas** chaves compostas; `lancamento.lancamento_par_id` mútuo com `ON DELETE CASCADE`, cumprindo F2/F16. Verificada por `FormaPagamentoApiTest` (21) e `TransferenciaApiTest` (14) | ✔ |
 | V12 | Domínio, fatia 2: `cartao`, `cartao_emitido`, `fatura` + `fatura_id` e as colunas de parcelamento no lançamento; `PAGAMENTO_FATURA` como quarta sistêmica. **Sem `parcela`** (B-D55) e **sem `regra_recorrencia`** (B-D56, entrega própria). Sai junto da T-06 e resolve I-07. Verificada por `CartaoApiTest` | ✔ |
 | V13 | `lancamento.cartao_emitido_id` (B-D64): o lançamento passa a saber qual plástico ou virtual fez a compra, para o extrato da fatura ter dono. `ck_lancamento_cartao_exige_fatura` denunciou um defeito da V12 no primeiro parcelamento | ✔ |
+| V14 | `app_criar_ambiente(nome)` (B-D70): porta estreita para criar ambiente adicional pela tela. Verificada por `PerfilApiTest` | ✔ |

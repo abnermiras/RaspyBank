@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAutenticacao } from '../contexto/Autenticacao.jsx'
 
 // =============================================================================
@@ -19,14 +19,36 @@ const ITENS = [
   { rotulo: 'Categorias', caminho: '/categorias' },
   { rotulo: 'Contas', caminho: '/contas' },
   { rotulo: 'Cartões', caminho: '/cartoes' },
+  { rotulo: 'Perfil', caminho: '/perfil' },
 ]
 
 export default function Casca() {
   const { perfil, sair, trocarAmbiente } = useAutenticacao()
+  const navegar = useNavigate()
 
   const ambientes = perfil?.ambientes ?? []
   const atual = perfil?.ambienteAtual ?? ''
   const nomeDoAtual = ambientes.find((a) => a.id === atual)?.nome
+
+  /**
+   * Trocar de ambiente e ir para o mapa, com os dados do ambiente novo.
+   *
+   * Antes, a troca atualizava o token e o perfil e deixava a tela aberta
+   * exibindo os dados do ambiente ANTERIOR — só um recarregar do navegador
+   * corrigia. A tela mentia em silêncio, que é o pior jeito de errar.
+   *
+   * São duas coisas, e as duas são necessárias:
+   *
+   *   1. Navegar para o mapa. Foi o pedido dele, e faz sentido: o mapa é a
+   *      resposta de "como está este ambiente".
+   *   2. A `key` no <Outlet/> abaixo. Sem ela, quem JÁ estivesse no mapa não
+   *      veria nada acontecer — o React Router não remonta um componente ao
+   *      navegar para a rota em que ele já está.
+   */
+  async function trocarEIrParaOMapa(ambienteId) {
+    const resposta = await trocarAmbiente(ambienteId)
+    if (resposta.ok) navegar('/mapa')
+  }
 
   return (
     <div className="casca">
@@ -40,7 +62,7 @@ export default function Casca() {
             value={atual}
             // Com um ambiente só, o seletor não tem o que oferecer.
             disabled={ambientes.length < 2}
-            onChange={(e) => trocarAmbiente(e.target.value)}
+            onChange={(e) => trocarEIrParaOMapa(e.target.value)}
           >
             {ambientes.map((ambiente) => (
               <option key={ambiente.id} value={ambiente.id}>{ambiente.nome}</option>
@@ -68,7 +90,15 @@ export default function Casca() {
         </nav>
 
         <main className="centro">
-          <Outlet />
+          {/*
+            A `key` amarra a tela ao ambiente: trocar de ambiente REMONTA o que
+            estiver aberto, e o `useCarregar` de cada tela busca de novo.
+
+            Remontar perde o estado dos formulários, e aqui isso é desejado:
+            um lançamento meio preenchido para a Casa não deveria sobreviver à
+            troca para o PJ — ele iria para a conta errada.
+          */}
+          <Outlet key={atual} />
         </main>
       </div>
     </div>

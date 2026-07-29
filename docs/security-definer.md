@@ -65,6 +65,17 @@ O impasse: a política de `conta` pergunta a `app_contas_do_usuario()` se a cont
 
 Ela **confere o vínculo do usuário com o ambiente** antes de gravar, e essa checagem não é decorativa: SECURITY DEFINER ignora políticas, então quem escreve uma função dessas assume a responsabilidade que o banco deixou de ter. Sem a checagem, a função aceitaria qualquer ambiente e seria exatamente o buraco que o RLS existe para fechar.
 
+### `app_criar_ambiente(nome)` — V14
+**A terceira exceção**, e do mesmo formato das outras duas. Cria `ambiente`, o vínculo em `usuario_ambiente` e as sistêmicas, na mesma transação.
+
+O impasse é o de sempre: `pol_ambiente_vinculado` pergunta a `app_ambientes_do_usuario()` se o ambiente está entre os do usuário, e para um que está nascendo a resposta é sempre não. Nenhuma ordem de INSERT resolve, porque o `WITH CHECK` é avaliado na hora do INSERT em `ambiente`.
+
+**A identidade vem da sessão, não de parâmetro**, e a diferença é de segurança: com o usuário como argumento, esta função viraria "crie um ambiente para fulano" e qualquer chamador poderia criar ambiente no nome de outro. É a mesma disciplina que `app_criar_conta` aplica ao conferir o vínculo antes de gravar — DEFINER ignora políticas, então quem escreve a função assume a responsabilidade que o banco deixou de ter.
+
+**O que ela não faz:** não apaga, não renomeia, não convida. Porta estreita que cresce deixa de ser estreita.
+
+Nasceu de um beco que o uso revelou: o seletor de ambiente da casca ficava desabilitado com um ambiente só, e não havia como criar o segundo.
+
 ### `fn_criar_categorias_sistemicas(ambiente_id)` — V10 — **não é SECURITY DEFINER**
 Insere as três sistêmicas de B-D13. Não precisa de DEFINER porque nunca é chamada sozinha por usuário: roda dentro de `auth_criar_ambiente_inicial` (que já é DEFINER) ou como proprietário, na retroalimentação da própria migração. Listada aqui para que a ausência do modificador seja deliberada e não descuido.
 
@@ -93,6 +104,7 @@ Grava no `outbox` na mesma transação do lançamento (F28). DEFINER pela mesma 
 | `auth_registrar_evento` | V6 | Pré-identidade | Auditoria de autenticação, SÓ ela |
 | `auth_ambientes_do_usuario(uuid)` | V7 | Pré-identidade | Ambiente para o JWT |
 | `app_criar_conta` | V10 | Com sessão | Impasse de vínculo: conta + `conta_ambiente` |
-| `fn_criar_categorias_sistemicas` — *não é DEFINER* | V10 | Interno | As três sistêmicas de B-D13 |
+| `app_criar_ambiente` | V14 | Com sessão | Impasse de vínculo: ambiente + `usuario_ambiente` + sistêmicas |
+| `fn_criar_categorias_sistemicas` — *não é DEFINER* | V10 | Interno | As sistêmicas de B-D13 |
 | `fn_auditar` | V10 | Gatilho | Auditoria de domínio com canal |
 | `fn_publicar_evento_lancamento` | V10 | Gatilho | Outbox do lançamento |

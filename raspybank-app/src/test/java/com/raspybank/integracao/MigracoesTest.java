@@ -55,6 +55,12 @@ class MigracoesTest extends IntegracaoTest {
         // camada em que a operacao vive.
         "app_contas_do_usuario",
         "app_criar_conta",
+        // V14. Terceira excecao, e do mesmo formato: pol_ambiente_vinculado nao
+        // enxerga um ambiente que esta nascendo, porque o vinculo so pode
+        // existir depois dele. A identidade vem da SESSAO e nao de parametro —
+        // com o usuario como argumento, a funcao viraria "crie um ambiente para
+        // fulano".
+        "app_criar_ambiente",
         // Gatilhos (V10). Precisam de DEFINER porque o registro que gravam tem
         // de entrar mesmo quando o autor nao tem identidade valida — auditoria
         // recusada pela politica seria o pior resultado possivel.

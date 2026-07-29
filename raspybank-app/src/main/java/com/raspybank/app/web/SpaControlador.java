@@ -35,7 +35,8 @@ public class SpaControlador {
         "/lancamentos",
         "/categorias",
         "/contas",
-        "/cartoes"
+        "/cartoes",
+        "/perfil"
     })
     public String telas() {
         // "forward" e não "redirect": o endereço na barra continua sendo o que

@@ -4,6 +4,7 @@ import Casca from './telas/Casca.jsx'
 import Categorias from './telas/Categorias.jsx'
 import Cartoes from './telas/Cartoes.jsx'
 import Contas from './telas/Contas.jsx'
+import Perfil from './telas/Perfil.jsx'
 import Entrada from './telas/Entrada.jsx'
 import Lancamentos from './telas/Lancamentos.jsx'
 import MapaDeGastos from './telas/MapaDeGastos.jsx'
@@ -32,6 +33,7 @@ export default function App() {
               <Route path="/categorias" element={<Categorias />} />
               <Route path="/contas" element={<Contas />} />
               <Route path="/cartoes" element={<Cartoes />} />
+              <Route path="/perfil" element={<Perfil />} />
               <Route index element={<Navigate to="/mapa" replace />} />
             </Route>
           </Route>
