@@ -3,9 +3,9 @@ package com.raspybank.app.web;
 import com.raspybank.lancamento.dominio.CicloFatura;
 import com.raspybank.lancamento.dominio.Fatura;
 import com.raspybank.lancamento.dominio.FormaPagamento;
+import com.raspybank.lancamento.dominio.LinhaDaFatura;
 import com.raspybank.lancamento.dominio.QuitacaoFatura;
 import com.raspybank.lancamento.servico.FaturaServico;
-import com.raspybank.lancamento.servico.LancamentoServico;
 import com.raspybank.shared.contexto.ContextoRequisicao;
 import com.raspybank.shared.erro.OperacaoNaoPermitida;
 import jakarta.validation.Valid;
@@ -168,7 +168,7 @@ public class FaturaControlador {
     ) {}
 
     /**
-     * Um gasto no extrato da fatura.
+     * Um gasto no extrato da fatura, e ele pode ser de OUTRO ambiente (§4l).
      *
      * <p>Traz {@code cartao} porque uma fatura mistura o fisico, os virtuais e
      * os adicionais — e sem dono, ela e uma pilha de gastos. Pedido dele nos
@@ -177,40 +177,57 @@ public class FaturaControlador {
      *
      * <p>Traz categoria e subcategoria pelo mesmo motivo de sempre (B-D4/R8):
      * resolvidas na hora, nunca congeladas no lancamento.</p>
+     *
+     * <p>Com o cartao dividido, a fatura soma as compras dos dois (B-D87) — senao
+     * ela pareceria menor do que e, e o pagamento sairia curto. Entao a lista
+     * mostra as duas mãos, e a de fora vem recortada.</p>
+     *
+     * <p>{@code descricao}, {@code categoria} e {@code subcategoria} sao nulos na
+     * linha alheia, e nao e este record que os apaga: eles nao vem do banco
+     * (B-D89 via B-D97). Ja a <b>parcela</b> vem (B-D102): as proximas sao
+     * dinheiro do dono do contrato preso no limite dele.</p>
      */
     public record GastoDaFatura(
         UUID id,
+        boolean meu,
         String descricao,
         String valor,
         String tipo,
+        String situacao,
         LocalDate dataCompetencia,
         Referencia categoria,
         Referencia subcategoria,
         Cartao cartao,
+        Quem quem,
         Short parcelaNumero,
         Short parcelaTotal
     ) {
-        static GastoDaFatura de(LancamentoServico.Item item) {
-            var l = item.lancamento();
+        static GastoDaFatura de(LinhaDaFatura l) {
             return new GastoDaFatura(
-                l.getId(),
-                l.getDescricao(),
-                l.getValor().setScale(2, RoundingMode.UNNECESSARY).toPlainString(),
-                l.getTipo().name(),
-                l.getDataCompetencia(),
-                item.categoria() == null ? null
-                    : new Referencia(item.categoria().getId(), item.categoria().getNome()),
-                item.subcategoria() == null ? null
-                    : new Referencia(item.subcategoria().getId(), item.subcategoria().getNome()),
-                item.cartaoEmitido() == null ? null : new Cartao(
-                    item.cartaoEmitido().getId(),
-                    item.cartaoEmitido().getNomeTitular(),
-                    item.cartaoEmitido().getTipo().name(),
-                    item.cartaoEmitido().getFinalDoCartao()),
-                l.getParcelaNumero(),
-                l.getParcelaTotal());
+                l.id(),
+                l.meu(),
+                l.descricao(),
+                l.valor().setScale(2, RoundingMode.UNNECESSARY).toPlainString(),
+                l.tipo().name(),
+                l.situacao().name(),
+                l.dataCompetencia(),
+                l.categoriaId() == null ? null
+                    : new Referencia(l.categoriaId(), l.categoriaNome()),
+                l.subcategoriaId() == null ? null
+                    : new Referencia(l.subcategoriaId(), l.subcategoriaNome()),
+                l.cartaoEmitidoId() == null ? null : new Cartao(
+                    l.cartaoEmitidoId(),
+                    l.titular(),
+                    l.tipoEmitido() == null ? null : l.tipoEmitido().name(),
+                    l.finalDoCartao()),
+                new Quem(l.quemNome()),
+                l.parcelaNumero(),
+                l.parcelaTotal());
         }
     }
+
+    /** Quem lancou — o "quem" de B-D89, que vem de {@code criado_por}. */
+    public record Quem(String nome) {}
 
     public record Referencia(UUID id, String nome) {}
 
@@ -228,7 +245,20 @@ public class FaturaControlador {
         String aPagar,
         CicloFatura ciclo,
         QuitacaoFatura quitacao,
-        boolean vencida
+        boolean vencida,
+
+        /**
+         * De onde vem {@code total} (B-D110). {@code CONTRATO} para quem abriu o
+         * cartao — e o valor unico que o banco cobra, somando os dez plasticos.
+         * {@code MEUS_PLASTICOS} para quem recebeu um plastico dividido: soma
+         * apenas o que ELE gastou.
+         *
+         * <p>Marcador estavel, no espirito de {@code SEM_ACESSO_AO_AMBIENTE}: a
+         * tela decide pelo valor, nunca pelo texto. Com {@code MEUS_PLASTICOS},
+         * {@code pago}, {@code aPagar} e {@code quitacao} nao tem sentido — quem
+         * paga a fatura e o dono do contrato (B-D107) — e a tela nao os exibe.</p>
+         */
+        String escopoDoTotal
     ) {
         static FaturaResposta de(FaturaServico.Item item) {
             Fatura f = item.fatura();
@@ -238,7 +268,8 @@ public class FaturaControlador {
                 dinheiro(item.numeros().total()),
                 dinheiro(item.numeros().pago()),
                 dinheiro(item.numeros().aPagar()),
-                item.ciclo(), item.quitacao(), item.vencida());
+                item.ciclo(), item.quitacao(), item.vencida(),
+                item.doContrato() ? "CONTRATO" : "MEUS_PLASTICOS");
         }
 
         private static String dinheiro(BigDecimal valor) {

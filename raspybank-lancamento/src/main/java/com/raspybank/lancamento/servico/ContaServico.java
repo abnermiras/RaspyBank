@@ -7,7 +7,9 @@ import com.raspybank.lancamento.dominio.ContaAmbiente;
 import com.raspybank.lancamento.dominio.ContaFormaPagamento;
 import com.raspybank.lancamento.dominio.FormaPagamento;
 import com.raspybank.lancamento.dominio.Lancamento;
+import com.raspybank.lancamento.dominio.LinhaDoExtrato;
 import com.raspybank.lancamento.dominio.NaturezaConta;
+import com.raspybank.lancamento.dominio.SituacaoLancamento;
 import com.raspybank.lancamento.dominio.TipoLancamento;
 import com.raspybank.lancamento.repositorio.CategoriaRepositorio;
 import com.raspybank.lancamento.repositorio.ContaAmbienteRepositorio;
@@ -28,11 +30,11 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -63,6 +65,7 @@ public class ContaServico {
     private final LancamentoRepositorio lancamentos;
     private final ContaFormaPagamentoRepositorio formasDePagamento;
     private final SituacaoVencidaServico vencidos;
+    private final CompartilhamentoContaServico compartilhamentos;
 
     @PersistenceContext
     private EntityManager em;
@@ -72,13 +75,15 @@ public class ContaServico {
                         CategoriaRepositorio categorias,
                         LancamentoRepositorio lancamentos,
                         ContaFormaPagamentoRepositorio formasDePagamento,
-                        SituacaoVencidaServico vencidos) {
+                        SituacaoVencidaServico vencidos,
+                        CompartilhamentoContaServico compartilhamentos) {
         this.contas = contas;
         this.vinculos = vinculos;
         this.categorias = categorias;
         this.lancamentos = lancamentos;
         this.formasDePagamento = formasDePagamento;
         this.vencidos = vencidos;
+        this.compartilhamentos = compartilhamentos;
     }
 
     // =========================================================================
@@ -109,15 +114,33 @@ public class ContaServico {
 
         List<UUID> ids = lista.stream().map(Conta::getId).toList();
 
-        Map<UUID, SaldoDaConta> saldos = lancamentos.saldos(ids).stream()
-            .collect(Collectors.toMap(SaldoDaConta::contaId, Function.identity()));
+        Map<UUID, SaldoDaConta> saldos = saldosQueAtravessam(ambienteId);
 
+        // Vinculo ATIVO (B-D93): a conta devolvida sai da lista de ambientes na
+        // hora, e o encerrado nao volta a aparecer como se nada tivesse
+        // acontecido.
         Map<UUID, List<UUID>> ambientesPorConta = new HashMap<>();
-        for (ContaAmbiente v : vinculos.findByContaIdIn(ids)) {
+        Map<UUID, Boolean> origemPorConta = new HashMap<>();
+        for (ContaAmbiente v : vinculos.findByContaIdInAndEncerradoEmIsNull(ids)) {
             ambientesPorConta
                 .computeIfAbsent(v.getContaId(), k -> new ArrayList<>())
                 .add(v.getAmbienteId());
+
+            // O vinculo DESTE ambiente e quem responde "ha porta aqui?" (B-D95).
+            if (v.getAmbienteId().equals(ambienteId)) {
+                origemPorConta.put(v.getContaId(), v.isOrigem());
+            }
         }
+
+        Set<UUID> compartilhadas = contasCompartilhadas(ambienteId);
+        Map<UUID, String> recebidasDe = donosDasContasRecebidas(ambienteId);
+
+        // Duas perguntas parecidas que NAO sao a mesma, e confundi-las foi o
+        // defeito que CompartilhamentoApiTest apanhou: "a conta nasceu aqui?"
+        // (origem) responde quem mexe no dinheiro dela, e o convidado do
+        // ambiente mexe (B-D76); "eu sou dono deste ambiente?" responde quem
+        // mexe na PORTA, e so o dono compartilha (B-D91).
+        boolean souDonoDoAmbiente = souDonoDoAmbiente(ambienteId);
 
         // Quarta consulta, mesmo criterio das outras tres: uma para as formas de
         // TODAS as contas, nao uma por conta.
@@ -133,7 +156,11 @@ public class ContaServico {
                 c,
                 saldos.getOrDefault(c.getId(), SaldoDaConta.zeradoPara(c.getId())),
                 ambientesPorConta.getOrDefault(c.getId(), List.of()),
-                formasPorConta.getOrDefault(c.getId(), List.of())))
+                formasPorConta.getOrDefault(c.getId(), List.of()),
+                origemPorConta.getOrDefault(c.getId(), true),
+                souDonoDoAmbiente && origemPorConta.getOrDefault(c.getId(), false),
+                compartilhadas.contains(c.getId()),
+                recebidasDe.get(c.getId())))
             .toList();
     }
 
@@ -150,24 +177,106 @@ public class ContaServico {
         vencidos.realizarVencidos(ambienteId, LocalDate.now());
         Conta c = exigir(ambienteId, contaId);
 
-        SaldoDaConta saldo = lancamentos.saldos(List.of(contaId)).stream()
-            .findFirst()
-            .orElseGet(() -> SaldoDaConta.zeradoPara(contaId));
+        SaldoDaConta saldo = saldo(ambienteId, contaId);
 
-        List<UUID> ambienteIds = vinculos.findByContaId(contaId).stream()
-            .map(ContaAmbiente::getAmbienteId)
+        List<ContaAmbiente> ativos = vinculos.findByContaId(contaId).stream()
+            .filter(ContaAmbiente::estaAtivo)
             .toList();
 
-        return new Resumo(c, saldo, ambienteIds, formasDePagamento.findByContaId(contaId));
+        boolean origem = ativos.stream()
+            .filter(v -> v.getAmbienteId().equals(ambienteId))
+            .findFirst()
+            .map(ContaAmbiente::isOrigem)
+            .orElse(true);
+
+        boolean podeCompartilhar = origem && souDonoDoAmbiente(ambienteId);
+
+        return new Resumo(
+            c,
+            saldo,
+            ativos.stream().map(ContaAmbiente::getAmbienteId).toList(),
+            formasDePagamento.findByContaId(contaId),
+            origem,
+            podeCompartilhar,
+            // A pergunta so pode ser feita por quem passa pelo porteiro de
+            // app_compartilhamentos_da_conta — que e o dono. Para o convidado do
+            // ambiente, perguntar levantaria excecao e derrubaria a tela inteira.
+            podeCompartilhar && !compartilhamentos.compartilhamentos(contaId).isEmpty(),
+            origem ? null : compartilhamentos.donoDaConta(contaId).nome());
     }
 
+    /**
+     * O saldo de UMA conta, atravessando ambientes (B-D87).
+     *
+     * <p>Passa por {@code app_saldo_da_conta} e nao pelo repositorio: a RLS
+     * esconde o lancamento do outro ambiente, e esconde certo — a politica
+     * correta e justamente a que o esconde. O que sobra e uma pergunta legitima,
+     * <i>"quanto tem nesta conta?"</i>, cuja resposta atravessa uma fronteira que
+     * o resto do sistema nao deve atravessar. Ver B-D96 e o porteiro na primeira
+     * linha da funcao.</p>
+     *
+     * <p>Sem isto, os dois veriam saldos diferentes na mesma conta e cada um
+     * conferiria o proprio numero contra o mesmo extrato do banco.</p>
+     */
     @Transactional(readOnly = true)
     public SaldoDaConta saldo(UUID ambienteId, UUID contaId) {
         vencidos.realizarVencidos(ambienteId, LocalDate.now());
         exigir(ambienteId, contaId);
-        return lancamentos.saldos(List.of(contaId)).stream()
-            .findFirst()
-            .orElseGet(() -> SaldoDaConta.zeradoPara(contaId));
+
+        Object[] l = (Object[]) em.createNativeQuery(
+                "SELECT realizado, previsto FROM app_saldo_da_conta(:conta)")
+            .setParameter("conta", contaId)
+            .getSingleResult();
+
+        return new SaldoDaConta(contaId, (BigDecimal) l[0], (BigDecimal) l[1]);
+    }
+
+    /**
+     * O extrato da conta, e e aqui que ela se confere contra o banco (§2d).
+     *
+     * <p>Atravessa ambientes; o extrato do MES ({@code GET /api/lancamentos})
+     * continua sendo o do ambiente e nao atravessa. Sao duas perguntas
+     * diferentes, e a que bate com o extrato do banco e esta.</p>
+     *
+     * <p>A linha alheia chega recortada, e nao por filtro daqui: a funcao nao
+     * devolve descricao nem categoria do lancamento de outro ambiente (B-D89 via
+     * B-D97). O que a aplicacao nunca recebeu, ela nao vaza.</p>
+     */
+    @Transactional(readOnly = true)
+    @SuppressWarnings("unchecked")
+    public List<LinhaDoExtrato> extrato(UUID ambienteId, UUID contaId,
+                                        LocalDate inicio, LocalDate fim) {
+        vencidos.realizarVencidos(ambienteId, LocalDate.now());
+        exigir(ambienteId, contaId);
+
+        List<Object[]> linhas = em.createNativeQuery("""
+                SELECT id, meu, data_caixa, tipo, situacao, valor, forma_pagamento,
+                       descricao, categoria_id, categoria_nome, quem_nome,
+                       fatura_id, parcela_numero, parcela_total
+                  FROM app_extrato_da_conta(:conta, :inicio, :fim)
+                """)
+            .setParameter("conta", contaId)
+            .setParameter("inicio", inicio)
+            .setParameter("fim", fim)
+            .getResultList();
+
+        return linhas.stream()
+            .map(l -> new LinhaDoExtrato(
+                (UUID) l[0],
+                (Boolean) l[1],
+                ((java.sql.Date) l[2]).toLocalDate(),
+                TipoLancamento.valueOf((String) l[3]),
+                SituacaoLancamento.valueOf((String) l[4]),
+                (BigDecimal) l[5],
+                l[6] == null ? null : FormaPagamento.valueOf((String) l[6]),
+                (String) l[7],
+                (UUID) l[8],
+                (String) l[9],
+                (String) l[10],
+                (UUID) l[11],
+                l[12] == null ? null : ((Number) l[12]).intValue(),
+                l[13] == null ? null : ((Number) l[13]).intValue()))
+            .toList();
     }
 
     // =========================================================================
@@ -243,7 +352,7 @@ public class ContaServico {
                                           FormaPagamento padraoSaida,
                                           FormaPagamento padraoEntrada) {
 
-        Conta c = exigir(ambienteId, contaId);
+        Conta c = exigirNaoEmprestada(ambienteId, contaId);
 
         Set<FormaPagamento> desejadas = formas == null ? Set.of() : formas;
 
@@ -266,7 +375,7 @@ public class ContaServico {
 
     @Transactional
     public Conta renomear(UUID ambienteId, UUID id, String nome) {
-        Conta c = exigir(ambienteId, id);
+        Conta c = exigirNaoEmprestada(ambienteId, id);
         c.renomear(nome);
         return c;
     }
@@ -284,7 +393,7 @@ public class ContaServico {
      */
     @Transactional
     public Conta encerrar(UUID ambienteId, UUID id) {
-        Conta c = exigir(ambienteId, id);
+        Conta c = exigirNaoEmprestada(ambienteId, id);
 
         SaldoDaConta saldo = saldo(ambienteId, id);
         if (!saldo.estaZerado()) {
@@ -299,7 +408,7 @@ public class ContaServico {
 
     @Transactional
     public Conta reabrir(UUID ambienteId, UUID id) {
-        Conta c = exigir(ambienteId, id);
+        Conta c = exigirNaoEmprestada(ambienteId, id);
         c.reabrir();
         return c;
     }
@@ -433,15 +542,159 @@ public class ContaServico {
      * ambiente?".</p>
      */
     private Conta exigir(UUID ambienteId, UUID id) {
-        if (vinculos.findById(new ContaAmbiente.Chave(id, ambienteId)).isEmpty()) {
+        // O filtro de ativo nao e decorativo: pol_ca_leitura mostra tambem o
+        // vinculo encerrado (a pessoa precisa poder ver que devolveu a conta), e
+        // sem ele a conta revogada continuaria passando por esta porta — para
+        // morrer duas linhas abaixo com um 404 confuso, vindo da conta e nao do
+        // vinculo.
+        if (vinculos.findById(new ContaAmbiente.Chave(id, ambienteId))
+                .filter(ContaAmbiente::estaAtivo)
+                .isEmpty()) {
             throw new RecursoNaoEncontrado("Conta nao encontrada");
         }
         return contas.findById(id).orElseThrow(
             () -> new RecursoNaoEncontrado("Conta nao encontrada"));
     }
 
-    /** Uma conta com o que a T-05 precisa mostrar junto dela. */
+    /**
+     * A conta nasceu neste ambiente — exigencia de renomear, encerrar, reabrir e
+     * mexer nas formas (B-D95).
+     *
+     * <p>{@code pol_conta_escrita} ja recusa no banco, e a checagem aqui existe
+     * porque a recusa da politica <b>nao produz erro</b>: o UPDATE simplesmente
+     * nao encontra a linha, e o Hibernate transforma isso num 500 sobre estado
+     * obsoleto. A pessoa merece a frase, e o 403.</p>
+     *
+     * <p>Nao confundir com "ser dono do ambiente": quem entrou no ambiente por
+     * convite (V15) renomeia e encerra a vontade, porque ali isso e DINHEIRO
+     * (B-D76). O que esta barrado e mexer no cadastro de uma conta que nasceu na
+     * casa de outra pessoa.</p>
+     */
+    private Conta exigirNaoEmprestada(UUID ambienteId, UUID id) {
+        Conta c = exigir(ambienteId, id);
+
+        boolean emprestada = vinculos.findById(new ContaAmbiente.Chave(id, ambienteId))
+            .map(v -> !v.isOrigem())
+            .orElse(false);
+
+        if (emprestada) {
+            throw new OperacaoNaoPermitida(
+                "Esta conta foi compartilhada com voce. Lance nela a vontade;"
+                    + " renomear, encerrar e mudar as formas de pagamento sao de quem a abriu.");
+        }
+        return c;
+    }
+
+    /**
+     * Os saldos de TODAS as contas do ambiente, atravessando ambientes, numa
+     * consulta so.
+     *
+     * <p>Uma consulta para a tela inteira, e nao uma por conta — o mesmo
+     * criterio de {@code somarPorConta}, que ela substitui. O
+     * {@code CROSS JOIN LATERAL} chama {@code app_saldo_da_conta} uma vez por
+     * linha de {@code conta_ambiente} sem que a aplicacao precise enviar a lista
+     * de ids: quem enumera as contas e o proprio vinculo, que a RLS ja filtra
+     * pelo lado de quem pergunta.</p>
+     *
+     * <p>Vem cartao junto, e nao ha problema: quem chama procura por id, e a
+     * listagem ja filtrou as bancarias antes (B-D62).</p>
+     */
+    @SuppressWarnings("unchecked")
+    private Map<UUID, SaldoDaConta> saldosQueAtravessam(UUID ambienteId) {
+        List<Object[]> linhas = em.createNativeQuery("""
+                SELECT ca.conta_id, s.realizado, s.previsto
+                  FROM conta_ambiente ca
+                  CROSS JOIN LATERAL app_saldo_da_conta(ca.conta_id) s
+                 WHERE ca.ambiente_id = :ambiente
+                   AND ca.encerrado_em IS NULL
+                """)
+            .setParameter("ambiente", ambienteId)
+            .getResultList();
+
+        Map<UUID, SaldoDaConta> saldos = new HashMap<>();
+        for (Object[] l : linhas) {
+            UUID contaId = (UUID) l[0];
+            saldos.put(contaId, new SaldoDaConta(contaId, (BigDecimal) l[1], (BigDecimal) l[2]));
+        }
+        return saldos;
+    }
+
+    /**
+     * Quais contas deste ambiente estao nas maos de mais alguem.
+     *
+     * <p>Explica na tela por que o saldo e maior do que a soma dos lancamentos
+     * visiveis — sem esta marca, a conta compartilhada pareceria ter um erro de
+     * soma.</p>
+     *
+     * <p>O filtro por {@code app_contas_proprias()} nao e redundancia do
+     * porteiro da funcao: e o que impede o porteiro de <b>levantar excecao</b>.
+     * Sem ele, uma conta emprestada nesta lista abortaria a consulta inteira, e a
+     * tela de contas quebraria para quem recebeu uma.</p>
+     */
+    @SuppressWarnings("unchecked")
+    private Set<UUID> contasCompartilhadas(UUID ambienteId) {
+        List<UUID> ids = em.createNativeQuery("""
+                SELECT DISTINCT ca.conta_id
+                  FROM conta_ambiente ca
+                  CROSS JOIN LATERAL app_compartilhamentos_da_conta(ca.conta_id) x
+                 WHERE ca.ambiente_id = :ambiente
+                   AND ca.conta_id IN (SELECT app_contas_proprias())
+                """)
+            .setParameter("ambiente", ambienteId)
+            .getResultList();
+
+        return new HashSet<>(ids);
+    }
+
+    /**
+     * Sou dono deste ambiente, ou entrei nele por convite (V15)?
+     *
+     * <p>Uma pergunta ao banco em vez de um parametro vindo do controlador: a
+     * resposta e a mesma que o porteiro das funcoes usa, e duas formulacoes da
+     * mesma regra divergem no dia em que uma delas muda.</p>
+     */
+    private boolean souDonoDoAmbiente(UUID ambienteId) {
+        return (Boolean) em.createNativeQuery(
+                "SELECT :ambiente IN (SELECT app_ambientes_proprios())")
+            .setParameter("ambiente", ambienteId)
+            .getSingleResult();
+    }
+
+    /** O nome de quem abriu cada conta que este ambiente recebeu emprestada. */
+    @SuppressWarnings("unchecked")
+    private Map<UUID, String> donosDasContasRecebidas(UUID ambienteId) {
+        List<Object[]> linhas = em.createNativeQuery("""
+                SELECT ca.conta_id, d.nome
+                  FROM conta_ambiente ca
+                  CROSS JOIN LATERAL app_dono_da_conta(ca.conta_id) d
+                 WHERE ca.ambiente_id = :ambiente
+                   AND NOT ca.origem
+                   AND ca.encerrado_em IS NULL
+                """)
+            .setParameter("ambiente", ambienteId)
+            .getResultList();
+
+        Map<UUID, String> donos = new HashMap<>();
+        for (Object[] l : linhas) {
+            donos.put((UUID) l[0], (String) l[1]);
+        }
+        return donos;
+    }
+
+    /**
+     * Uma conta com o que a T-05 precisa mostrar junto dela.
+     *
+     * <p>Os quatro ultimos campos sao da V16 e respondem quatro perguntas da
+     * tela. {@code origem} — a conta nasceu aqui? E o que libera renomear,
+     * encerrar e mexer nas formas, que sao DINHEIRO e valem tambem para quem
+     * entrou no ambiente por convite (B-D76). {@code podeCompartilhar} — sou dono
+     * do ambiente onde ela nasceu? E o que libera a PORTA (B-D91), e e mais
+     * estreito que o anterior de proposito. {@code compartilhada} — alguem mais
+     * tem esta conta? {@code recebidaDe} — de quem eu a recebi?</p>
+     */
     public record Resumo(Conta conta, SaldoDaConta saldo, List<UUID> ambienteIds,
-                         List<ContaFormaPagamento> formasDePagamento) {
+                         List<ContaFormaPagamento> formasDePagamento,
+                         boolean origem, boolean podeCompartilhar,
+                         boolean compartilhada, String recebidaDe) {
     }
 }

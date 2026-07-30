@@ -26,5 +26,16 @@ public interface ContaAmbienteRepositorio
     /** Uma consulta para a tela inteira: em que ambientes cada conta aparece. */
     List<ContaAmbiente> findByContaIdIn(Collection<UUID> contaIds);
 
+    /**
+     * A mesma consulta, so os vinculos vivos (B-D93).
+     *
+     * <p>A revogacao de conta compartilhada e logica, e por um motivo que nao e
+     * leniencia: {@code fk_lancamento_conta} e {@code ON DELETE RESTRICT}, e o
+     * dinheiro dela passou pela conta de verdade — apagar faria o saldo do dono
+     * divergir do extrato do banco. Consequencia: leitura de vinculo precisa
+     * dizer qual dos dois quer.</p>
+     */
+    List<ContaAmbiente> findByContaIdInAndEncerradoEmIsNull(Collection<UUID> contaIds);
+
     List<ContaAmbiente> findByAmbienteId(UUID ambienteId);
 }

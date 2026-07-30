@@ -96,6 +96,9 @@ export async function pedirComRenovacao(caminho, opcoes = {}) {
   const tokenUsado = tokenAcesso()
 
   const primeira = await pedir(caminho, autenticado)
+  if (primeira.status === 403 && primeira.corpo?.motivo === 'SEM_ACESSO_AO_AMBIENTE') {
+    return voltarParaAmbienteProprio(primeira)
+  }
   if (primeira.status !== 401) return primeira
 
   // Outra chamada já renovou enquanto esta viajava. Renovar de novo consumiria
@@ -108,6 +111,36 @@ export async function pedirComRenovacao(caminho, opcoes = {}) {
   if (!renovacao.ok) return primeira // a sessão acabou de verdade
 
   return pedir(caminho, autenticado)
+}
+
+/**
+ * O 403 de B-D83: o acesso ao ambiente do token foi revogado.
+ *
+ * O RLS já cortou os dados — nada indevido apareceu —, mas sem reação a tela
+ * ficaria vazia e sem explicação: contas zeradas, mapa em branco, nenhum erro.
+ * A saída é a renovação, que é a rota de fuga deliberada: o servidor
+ * (`ambienteParaRenovacao`) percebe que o ambiente declarado não é mais da
+ * pessoa e emite o token num ambiente que É dela, em silêncio.
+ *
+ * O recarregar da página é proposital, pelo mesmo motivo da `key` no Outlet da
+ * casca: a tela aberta pertence ao ambiente que a pessoa PERDEU, e qualquer
+ * formulário meio preenchido nela iria para o lugar errado. A explicação
+ * atravessa o recarregar pelo sessionStorage e a casca a mostra uma vez.
+ */
+export const AVISO_DE_SESSAO = 'raspybank.avisoDeSessao'
+
+async function voltarParaAmbienteProprio(respostaOriginal) {
+  const renovacao = await renovar()
+  if (renovacao.ok) {
+    sessionStorage.setItem(
+      AVISO_DE_SESSAO,
+      'Seu acesso ao ambiente em que você estava foi removido. Você voltou para um ambiente seu.',
+    )
+    window.location.replace('/mapa')
+  }
+  // Renovação recusada = a sessão acabou de verdade; o 403 sobe para a tela e
+  // o fluxo normal de sessão expirada assume.
+  return respostaOriginal
 }
 
 /**

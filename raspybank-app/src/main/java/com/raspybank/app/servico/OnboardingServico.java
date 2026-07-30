@@ -56,9 +56,9 @@ public class OnboardingServico {
      * tratar — melhor nao existir.</p>
      */
     @Transactional
-    public Resultado cadastrar(String nome, String email, String senha) {
+    public Resultado cadastrar(String nome, String email, String senha, String telegramId) {
 
-        UUID usuarioId = autenticacao.cadastrar(nome, email, senha);
+        UUID usuarioId = autenticacao.cadastrar(nome, email, senha, telegramId);
 
         UUID ambienteId = ambientes.criarInicial(
             usuarioId, "Financas de " + primeiroNome(nome));

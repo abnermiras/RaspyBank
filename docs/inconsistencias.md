@@ -50,10 +50,12 @@ O documento de requisitos especifica Argon2id para hash de senha; a implementaç
 Confirmar o conjunto derivável: Aberta, Fechada, Paga, Vencida — lembrando F19: **não existe coluna de status**; tudo deriva de `fechada_em` + somas de pagamento + vencimento.
 **Quando resolver:** no desenho da **V12** (era V11 antes de B-D30) (a fatia 2 passou a ser V11 por B-D1; `fatura` não está mais na V10).
 
-## I-08 — Entrada de usuário em ambiente existente (pendência herdada)
+## I-08 — Entrada de usuário em ambiente existente (pendência herdada) — **RESOLVIDO na V15, em 29/07/2026**
 
 Convite por e-mail, código, ou adição manual. Fluxo pequeno, mas toca segurança (quem pode adicionar quem).
 **Quando resolver:** depois da V10, antes de qualquer uso real compartilhado.
+
+**Resolução:** o compartilhamento de ambiente (§4j de `decisoes.md`, B-D74 a B-D84; contrato em `api.md` §2c). Por e-mail, sem código e sem aceite (B-D80). "Quem pode adicionar quem" ganhou resposta estrutural: só o **dono** (B-D75/B-D76), com a regra repetida na política do banco — não só no serviço. A revogação com a pessoa dentro, que era o risco escondido do fluxo, fechou por B-D83/B-D84.
 
 ## I-09 — Dashboard (pendência herdada) — **RESOLVIDO em 26/07/2026**
 
@@ -152,15 +154,23 @@ Contrapartida de B-D7: `token_renovacao.ip_origem` passou a ser gravado, e grava
 
 **Quando resolver:** depois do mínimo aceitável, antes de qualquer exposição à internet. Se for descartada, o I-16 reabre para remover a coluna.
 
-## I-23 — O saldo de conta compartilhada pode ser parcial *(aberta — achada em 26/07/2026, fatia 2)*
+## I-23 — O saldo de conta compartilhada pode ser parcial *(RESOLVIDO em 29/07/2026, na V16)*
 
 O saldo é a soma dos lançamentos, e o RLS só libera os dos ambientes a que a pessoa pertence. Numa conta conjunta visível no ambiente "Casa" **e** no ambiente pessoal de cada um, um lançamento que a Alice fez no ambiente pessoal dela é invisível para o Bruno — e o saldo que ele vê é maior do que o dinheiro que existe.
 
 **Por que não foi corrigida agora:** a correção exigiria uma função `SECURITY DEFINER` somando por fora da política, e o critério B-D19 só a autoriza diante de **impasse estrutural** — quando a linha só se torna visível por um vínculo que ainda não pode existir. Aqui não há impasse: há uma escolha de visibilidade. Furar a política por conveniência é exatamente o que B-D19 passou a proibir.
 
-**Quando resolver:** junto de I-08 (entrada de usuário em ambiente existente). Enquanto não houver convite, não há segundo usuário para divergir, e o número está certo para todo mundo que existe hoje.
+**RESOLVIDO no desenho, em 29/07/2026** — e não adiado. O compartilhamento (§4j) aperta o B-D18: vincular conta a ambiente passa a exigir ser **dono** dos dois lados (B-D78), então a conta compartilhada não escapa para o ambiente pessoal de quem recebeu o acesso. Todo lançamento dela nasce no mesmo ambiente, e as duas pessoas veem o mesmo saldo.
 
-**Alternativa a avaliar na hora:** em vez de somar por fora, marcar a conta como "saldo parcial neste ambiente" quando ela tiver vínculo com ambiente que o usuário não enxerga — dizer a verdade sobre o recorte é melhor do que furar a política para escondê-lo.
+**Emenda no mesmo dia, algumas horas depois.** O compartilhamento de CONTA (§4k) reabre o caso de propósito, e resolve por outro caminho: em vez de proibir a conta de ir para outro ambiente, define o que isso significa — **o saldo atravessa ambientes, a classificação não** (B-D85). As duas respostas convivem porque tratam de quem decide: em §4j o convidado não leva a conta por conta própria; em §4k o dono concede.
+
+Vale registrar por quê: o I-23 não foi contornado. O modelo de compartilhamento que o Abner escolheu — a pessoa entra no ambiente e trabalha lá dentro, em vez de enxergar a conta do lado de fora — **não cria a divergência**. A correção que sobrou (B-D78) só fecha a porta lateral por onde ela ainda poderia entrar.
+
+**Fechado em código na V16, e o caminho foi o que o desenho previu.** A soma por fora da política existe — `app_saldo_da_conta`, `app_extrato_da_conta` e, na V17, `app_total_da_fatura` — e ela é a **quarta exceção** de B-D19 e a primeira em consulta de leitura. O impasse que a autoriza é real e diferente dos três anteriores: por construção uma pessoa **não pode** ver os lançamentos da outra pela política, e mesmo assim precisa **somá-los**. Não é conveniência de camada — nenhuma política resolveria, porque a política correta é justamente a que esconde o lançamento alheio.
+
+Cada uma das três tem **porteiro na primeira linha** (`conta_id IN (SELECT app_contas_do_usuario())`), sem o qual `SECURITY DEFINER` significaria "leia qualquer conta do sistema, basta ter o UUID". `CompartilhamentoContaApiTest` guarda o saldo igual dos dois lados; `CartaoCompartilhadoApiTest` guarda a fatura — onde o sintoma de errar não é confusão, é juros.
+
+**A alternativa que estava anotada aqui** — marcar a conta como "saldo parcial neste ambiente" em vez de somar — não foi usada como conserto, mas sobreviveu como **informação**: a conta dividida vem marcada `compartilhada: true`, e é essa marca que explica na tela por que o saldo é maior do que a soma dos lançamentos visíveis.
 
 ---
 
@@ -175,9 +185,9 @@ O saldo é a soma dos lançamentos, e o RLS só libera os dos ambientes a que a 
 | I-04 + I-13 | Canal auto-declarado (`Canal.WEB` fixo, header `X-Canal`) | Primeiro item do trabalho do bot Telegram. B-D6 preparou o terreno: o canal já viaja no contexto do RLS |
 | I-06 | Argon2id (requisitos) × BCrypt 12 (código) | Antes de publicar para terceiros |
 | I-07 | Estados da Fatura | Desenho da V12 |
-| I-08 | Entrada de usuário em ambiente existente (convite) | Depois do mínimo, antes de uso compartilhado real |
+| I-08 | ~~Entrada de usuário em ambiente existente~~ | **Resolvido na V15**, 29/07/2026 — compartilhamento de ambiente (§4j), implementado |
 | I-18 | Tela de sessões ativas | Depois do mínimo, antes de exposição à internet |
-| I-23 | Saldo parcial em conta compartilhada entre ambientes que o usuário não enxerga | Junto de I-08. Sem convite, não há segundo usuário para divergir |
+| I-23 | ~~Saldo parcial em conta compartilhada~~ | **Resolvido em código**, 29/07/2026 — B-D78/B-D79 na V15, B-D85/B-D87/B-D96 nas V16 e V17 (quarta exceção de B-D19, com porteiro) |
 | P-T8 | Token em `localStorage` × cookie `httpOnly` (`mapa-telas.md`) | Antes de expor à internet |
 
 Nenhum dos abertos bloqueia a V10.

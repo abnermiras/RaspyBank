@@ -114,12 +114,18 @@ public class PerfilControlador {
         resposta.put("email", eu.getEmail());
         resposta.put("criadoEm", eu.getCriadoEm());
 
+        // Somente leitura, e de proposito: o valor entra no cadastro (V18) e
+        // ainda nao ha caminho de edicao. Mostra-lo e o minimo honesto — sem
+        // isto, quem preencheu nao tem como conferir o que foi gravado.
+        resposta.put("telegramId", eu.getTelegramId());
+
         resposta.put("usuarioId", ContextoRequisicao.usuarioId().orElse(null));
         resposta.put("ambienteAtual", ContextoRequisicao.ambienteId().orElse(null));
         resposta.put("canal", ContextoRequisicao.canal().name());
 
+        var proprios = ambientes.ambientesProprios(usuarioId);
         List<Map<String, Object>> lista = ambientes.listarDoUsuario().stream()
-            .map(this::resumir)
+            .map(a -> resumir(a, proprios.contains(a.getId())))
             .toList();
 
         resposta.put("ambientes", lista);
@@ -135,10 +141,13 @@ public class PerfilControlador {
      * porque {@code app_ambientes_do_usuario()} ja filtra os ambientes
      * excluidos — quem chega nesta lista esta ativo por construcao.</p>
      */
-    private Map<String, Object> resumir(Ambiente a) {
+    private Map<String, Object> resumir(Ambiente a, boolean dono) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", a.getId());
         m.put("nome", a.getNome());
+        // V15: com compartilhamento, a lista mistura ambientes proprios e
+        // emprestados — a tela precisa saber onde ha porta.
+        m.put("dono", dono);
         return m;
     }
 }

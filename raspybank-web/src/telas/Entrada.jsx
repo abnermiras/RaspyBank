@@ -63,7 +63,14 @@ export default function Entrada() {
     try {
       const resposta = await pedir('/api/auth/cadastro', {
         metodo: 'POST',
-        corpo: { nome: dados.get('nome').trim(), email, senha: dados.get('senha') },
+        corpo: {
+          nome: dados.get('nome').trim(),
+          email,
+          senha: dados.get('senha'),
+          // Vazio vira nulo no banco (V18), então mandar '' é seguro — mas
+          // mandar o campo já aparado evita gravar espaço como identidade.
+          telegramId: (dados.get('telegramId') ?? '').trim(),
+        },
       })
       if (!resposta.ok) {
         // 409 = e-mail já cadastrado; 400 = validação, com "campos".
@@ -133,6 +140,24 @@ export default function Entrada() {
               className={marca('senha')}
             />
             <small className="dica">Ao menos 10 caracteres.</small>
+
+            {/*
+              OPCIONAL, e é o que vai ligar você ao bot (etapa 3 do roteiro). Fica
+              no cadastro porque é lá que o valor pode entrar: o caminho de
+              escrita é a própria inserção do usuário (V18) — no cadastro não há
+              identidade na sessão, e um preenchimento posterior seria recusado
+              pela política do banco.
+            */}
+            <label htmlFor="cadastro-telegram">Telegram (opcional)</label>
+            <input
+              type="text" id="cadastro-telegram" name="telegramId"
+              maxLength={64} autoComplete="off" placeholder="@seu_usuario"
+              className={marca('telegramId')}
+            />
+            <small className="dica">
+              Seu usuário ou o id numérico. Serve para o bot saber quem está
+              lançando — deixe em branco se ainda não usa.
+            </small>
 
             <Aviso aviso={aviso} />
             <button type="submit" className="botao-principal" disabled={enviando}>

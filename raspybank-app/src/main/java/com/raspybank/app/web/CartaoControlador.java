@@ -4,6 +4,7 @@ import com.raspybank.lancamento.dominio.Cartao;
 import com.raspybank.lancamento.dominio.CartaoEmitido;
 import com.raspybank.lancamento.dominio.TipoCartaoEmitido;
 import com.raspybank.lancamento.servico.CartaoServico;
+import com.raspybank.lancamento.servico.CompartilhamentoContaServico;
 import com.raspybank.shared.contexto.ContextoRequisicao;
 import com.raspybank.shared.erro.OperacaoNaoPermitida;
 import jakarta.validation.Valid;
@@ -13,6 +14,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -51,9 +53,12 @@ import java.util.UUID;
 public class CartaoControlador {
 
     private final CartaoServico cartoes;
+    private final CompartilhamentoContaServico compartilhamentos;
 
-    public CartaoControlador(CartaoServico cartoes) {
+    public CartaoControlador(CartaoServico cartoes,
+                             CompartilhamentoContaServico compartilhamentos) {
         this.cartoes = cartoes;
+        this.compartilhamentos = compartilhamentos;
     }
 
     @GetMapping
@@ -137,6 +142,62 @@ public class CartaoControlador {
 
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(CartaoResposta.de(cartoes.resumo(ambienteAtivo(), id)));
+    }
+
+    // =========================================================================
+    // Dividir um PLASTICO (V19) — §2e, B-D106
+    // =========================================================================
+
+    /**
+     * Com quem este plastico esta dividido.
+     *
+     * <p>A unidade e o plastico, e nao o cartao (B-D106): dividir o contrato
+     * entregaria os dez. Aqui vale o de sempre — a lista mostra a PESSOA, nunca em
+     * qual ambiente dela o cartao entrou (B-D90).</p>
+     */
+    @GetMapping("/{id}/emitidos/{emitidoId}/compartilhamentos")
+    public Map<String, Object> listarCompartilhamentos(@PathVariable UUID id,
+                                                      @PathVariable UUID emitidoId) {
+        return Map.of("compartilhamentos",
+            compartilhamentos.listarDoPlastico(emitidoId).stream()
+                .map(ContaControlador.CompartilhamentoResposta::de)
+                .toList());
+    }
+
+    /**
+     * Divide ESTE plastico — o adicional em nome dela, dentro da sua fatura.
+     *
+     * <p>Cria convite pendente: ela escolhe em qual ambiente dela o cartao
+     * aparece (B-D90). O que ela recebe e um meio de pagamento e o extrato daquele
+     * plastico — nao o contrato, nao o total da fatura, e nao os outros plasticos
+     * (B-D110).</p>
+     */
+    @PostMapping("/{id}/emitidos/{emitidoId}/compartilhamentos")
+    public ResponseEntity<Map<String, Object>> compartilharPlastico(
+            @PathVariable UUID id,
+            @PathVariable UUID emitidoId,
+            @Valid @RequestBody ContaControlador.PedidoCompartilhar pedido) {
+
+        UUID usuarioId = ContextoRequisicao.usuarioId().orElseThrow();
+        compartilhamentos.compartilharPlastico(id, emitidoId, pedido.email().trim(), usuarioId);
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(listarCompartilhamentos(id, emitidoId));
+    }
+
+    /**
+     * Tira alguem deste plastico — ou sai dele, no idioma de B-D77.
+     *
+     * <p>Quando nao sobra nenhum plastico daquele cartao para a pessoa, o cartao
+     * inteiro sai da vista dela: sem isso ela ficaria com um cartao na tela sem
+     * nenhum meio de pagamento.</p>
+     */
+    @DeleteMapping("/{id}/emitidos/{emitidoId}/compartilhamentos/{usuarioId}")
+    public ResponseEntity<Void> removerCompartilhamento(@PathVariable UUID id,
+                                                        @PathVariable UUID emitidoId,
+                                                        @PathVariable UUID usuarioId) {
+        compartilhamentos.removerDoPlastico(emitidoId, usuarioId);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/emitidos/{emitidoId}/cancelar")
@@ -269,7 +330,23 @@ public class CartaoControlador {
         int diaVencimento,
         int diasParaFechamento,
         OffsetDateTime encerradoEm,
-        List<EmitidoResposta> emitidos
+        List<EmitidoResposta> emitidos,
+
+        /**
+         * O cartao nasceu neste ambiente. Libera o que e dinheiro no contrato —
+         * emitir, cancelar emitido, mudar limite, encerrar — que vale tambem para
+         * quem entrou no ambiente por convite (§2c).
+         */
+        boolean origem,
+
+        /** Sou dono do ambiente onde ele nasceu: libera dividir (B-D91). */
+        boolean podeCompartilhar,
+
+        /** Outra pessoa tambem compra neste cartao e ve esta fatura. */
+        boolean compartilhado,
+
+        /** Quem abriu o contrato, quando o cartao veio dividido. Nulo no proprio. */
+        String recebidoDe
     ) {
         static CartaoResposta de(CartaoServico.Resumo r) {
             Cartao c = r.cartao();
@@ -280,7 +357,8 @@ public class CartaoControlador {
                 dinheiro(r.consumido()),
                 dinheiro(r.disponivel()),
                 c.getDiaVencimento(), c.getDiasParaFechamento(), c.getEncerradoEm(),
-                r.emitidos().stream().map(EmitidoResposta::de).toList());
+                r.emitidos().stream().map(e -> EmitidoResposta.de(r, e)).toList(),
+                r.origem(), r.podeCompartilhar(), r.compartilhado(), r.recebidoDe());
         }
 
         private static String dinheiro(BigDecimal valor) {
@@ -288,17 +366,33 @@ public class CartaoControlador {
         }
     }
 
+    /**
+     * Um plastico do contrato — e, desde a V19, a UNIDADE do compartilhamento.
+     *
+     * <p>{@code limiteEfetivo} e o "1.000 dentro dos 30.000" (B-D110): o limite
+     * proprio quando existe, o do contrato quando nao. {@code consumido} e o que
+     * ESTE plastico gastou, com as parcelas futuras (F23) — e e o numero que
+     * transforma a fatura nas "mini faturas" do e-mail do banco.</p>
+     */
     public record EmitidoResposta(
         UUID id, String nomeTitular, UUID usuarioId, TipoCartaoEmitido tipo,
-        String finalDoCartao, String limiteProprio, OffsetDateTime canceladoEm
+        String finalDoCartao, String limiteProprio,
+        String limiteEfetivo, String consumido,
+        OffsetDateTime canceladoEm
     ) {
-        static EmitidoResposta de(CartaoEmitido e) {
+        private static String valor(BigDecimal v) {
+            return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
+        }
+
+        static EmitidoResposta de(CartaoServico.Resumo r, CartaoEmitido e) {
             return new EmitidoResposta(
                 e.getId(), e.getNomeTitular(), e.getUsuarioId(), e.getTipo(),
                 e.getFinalDoCartao(),
                 e.getLimiteProprio() == null
                     ? null
                     : e.getLimiteProprio().setScale(2, RoundingMode.HALF_UP).toPlainString(),
+                valor(r.limiteDoPlastico(e)),
+                valor(r.consumidoDoPlastico(e)),
                 e.getCanceladoEm());
         }
     }

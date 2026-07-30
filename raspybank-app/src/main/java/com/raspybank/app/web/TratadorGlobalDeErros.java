@@ -143,6 +143,15 @@ public class TratadorGlobalDeErros {
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
                     "erro", "Ja existe uma conta com este e-mail"));
             }
+            // O indice do telegram tambem e PARCIAL (so nao-nulos, V1): varias
+            // contas sem telegram convivem, e por isso a string vazia vira nulo
+            // no cadastro (V18). Este 409 e o caso real de duas pessoas — ou da
+            // mesma pessoa duas vezes — apontando para a mesma conta de Telegram,
+            // que faria o bot nao saber para quem lancar.
+            if (mensagem.contains("ux_usuario_telegram")) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "erro", "Este Telegram ja esta ligado a outra conta"));
+            }
             // Os dois indices sao PARCIAIS: so valem entre as nao arquivadas.
             // Arquivar "Mercado" e criar outra "Mercado" e legitimo — a
             // primeira segue nomeando o passado, a segunda recomeca a

@@ -8,6 +8,9 @@ import com.raspybank.lancamento.dominio.ContaAmbiente;
 import com.raspybank.lancamento.dominio.Fatura;
 import com.raspybank.lancamento.dominio.FormaPagamento;
 import com.raspybank.lancamento.dominio.Lancamento;
+import com.raspybank.lancamento.dominio.LinhaDaFatura;
+import com.raspybank.lancamento.dominio.SituacaoLancamento;
+import com.raspybank.lancamento.dominio.TipoCartaoEmitido;
 import com.raspybank.lancamento.dominio.TipoLancamento;
 import com.raspybank.lancamento.dominio.TotalDaFatura;
 import com.raspybank.lancamento.repositorio.CartaoRepositorio;
@@ -97,7 +100,7 @@ public class FaturaServico {
     @Transactional
     public List<Item> listar(UUID ambienteId, UUID cartaoId, int ano, LocalDate hoje) {
         exigirCartao(ambienteId, cartaoId);
-        fecharVencidas(cartaoId, hoje);
+        fecharVencidasSePuder(ambienteId, cartaoId, hoje);
 
         List<Fatura> lista = faturas.doAno(cartaoId,
             LocalDate.of(ano, 1, 1), LocalDate.of(ano, 12, 1));
@@ -111,7 +114,7 @@ public class FaturaServico {
             .orElseThrow(() -> new RecursoNaoEncontrado("Fatura nao encontrada"));
 
         exigirCartao(ambienteId, f.getCartaoId());
-        fecharVencidas(f.getCartaoId(), hoje);
+        fecharVencidasSePuder(ambienteId, f.getCartaoId(), hoje);
 
         return comNumeros(List.of(f), f.getCartaoId(), hoje).get(0);
     }
@@ -129,13 +132,46 @@ public class FaturaServico {
      * na primeira coluna nova.</p>
      */
     @Transactional(readOnly = true)
-    public List<LancamentoServico.Item> lancamentosDa(UUID ambienteId, UUID faturaId) {
+    @SuppressWarnings("unchecked")
+    public List<LinhaDaFatura> lancamentosDa(UUID ambienteId, UUID faturaId) {
         Fatura f = faturas.findById(faturaId)
             .orElseThrow(() -> new RecursoNaoEncontrado("Fatura nao encontrada"));
         exigirCartao(ambienteId, f.getCartaoId());
 
-        return lancamentoServico.detalhar(
-            lancamentos.findByFaturaIdOrderByDataCompetenciaDescCriadoEmDesc(faturaId));
+        List<Object[]> linhas = em.createNativeQuery("""
+                SELECT id, meu, data_caixa, data_competencia, tipo, situacao, valor,
+                       forma_pagamento, descricao, categoria_id, categoria_nome,
+                       subcategoria_id, subcategoria_nome, quem_nome,
+                       cartao_emitido_id, titular, tipo_emitido, final_do_cartao,
+                       parcela_numero, parcela_total
+                  FROM app_extrato_da_fatura(:fatura)
+                """)
+            .setParameter("fatura", faturaId)
+            .getResultList();
+
+        return linhas.stream()
+            .map(l -> new LinhaDaFatura(
+                (UUID) l[0],
+                (Boolean) l[1],
+                ((java.sql.Date) l[2]).toLocalDate(),
+                ((java.sql.Date) l[3]).toLocalDate(),
+                TipoLancamento.valueOf((String) l[4]),
+                SituacaoLancamento.valueOf((String) l[5]),
+                (BigDecimal) l[6],
+                l[7] == null ? null : FormaPagamento.valueOf((String) l[7]),
+                (String) l[8],
+                (UUID) l[9],
+                (String) l[10],
+                (UUID) l[11],
+                (String) l[12],
+                (String) l[13],
+                (UUID) l[14],
+                (String) l[15],
+                l[16] == null ? null : TipoCartaoEmitido.valueOf((String) l[16]),
+                (String) l[17],
+                l[18] == null ? null : ((Number) l[18]).shortValue(),
+                l[19] == null ? null : ((Number) l[19]).shortValue()))
+            .toList();
     }
 
     // =========================================================================
@@ -145,6 +181,12 @@ public class FaturaServico {
     @Transactional
     public Fatura fechar(UUID ambienteId, UUID faturaId) {
         Fatura f = exigirFatura(ambienteId, faturaId);
+
+        // B-D108 revogou o B-D100, e o motivo veio de B-D107: quem paga a fatura
+        // e o dono do contrato, entao fechar o ciclo tambem e dele. Quem recebeu
+        // um plastico agiria sobre um documento que nao paga e cujo total nao ve.
+        exigirCartaoNaoEmprestado(ambienteId, f.getCartaoId());
+
         f.fechar(OffsetDateTime.now());
         return f;
     }
@@ -165,6 +207,7 @@ public class FaturaServico {
     @Transactional
     public Fatura reabrir(UUID ambienteId, UUID faturaId) {
         Fatura f = exigirFatura(ambienteId, faturaId);
+        exigirCartaoNaoEmprestado(ambienteId, f.getCartaoId());
         f.reabrir();
         return f;
     }
@@ -176,6 +219,28 @@ public class FaturaServico {
      * {@code SituacaoVencidaServico}: rotina de fundo nao tem identidade na
      * sessao, entao a RLS nao a enxerga e o UPDATE alcancaria zero linhas.</p>
      */
+    /**
+     * O fechamento automatico so roda para quem PODE fechar (B-D108).
+     *
+     * <p>Sem esta guarda, abrir a tela de cartoes de quem recebeu um plastico
+     * dispararia um UPDATE que {@code pol_fatura_porta} recusa — e a recusa da
+     * politica nao produz erro de permissao: ela nao encontra a linha, e o
+     * Hibernate transforma isso num 500 sobre estado obsoleto. A tela dela
+     * quebraria ao abrir, num caminho que nem e dela.</p>
+     *
+     * <p>Consequencia aceita: se so ela abrir o sistema por semanas, o ciclo fica
+     * aberto ate ele entrar. E coerente com B-D107 — o ciclo e do contrato.</p>
+     */
+    private void fecharVencidasSePuder(UUID ambienteId, UUID cartaoId, LocalDate hoje) {
+        boolean emprestado = vinculos.findById(new ContaAmbiente.Chave(cartaoId, ambienteId))
+            .map(v -> !v.isOrigem())
+            .orElse(false);
+
+        if (!emprestado) {
+            fecharVencidas(cartaoId, hoje);
+        }
+    }
+
     private void fecharVencidas(UUID cartaoId, LocalDate hoje) {
         for (Fatura f : faturas.vencidasParaFechar(List.of(cartaoId), hoje)) {
             f.fechar(OffsetDateTime.now());
@@ -223,6 +288,15 @@ public class FaturaServico {
 
         Fatura fatura = exigirFatura(ambienteId, faturaId);
         Cartao cartao = exigirCartao(ambienteId, fatura.getCartaoId());
+
+        // B-D107: quem paga a fatura e o dono do contrato. Ela compra no plastico
+        // que recebeu, e o acerto entre os dois acontece fora do cartao — por
+        // transferencia, ou porque ele paga e ela devolve. Revoga o B-D99, e ele
+        // decidiu assim sabendo: "no final a conta vai chegar com o total e eu sou
+        // o responsavel para fazer esse pagamento".
+        //
+        // Cada um pagar uma parte e conversa ADIADA, nao descartada.
+        exigirCartaoNaoEmprestado(ambienteId, cartao.getContaId());
 
         if (contaOrigemId.equals(cartao.getContaId())) {
             throw new OperacaoNaoPermitida(
@@ -274,20 +348,72 @@ public class FaturaServico {
     // Guardas e apoio
     // =========================================================================
 
+    /**
+     * Os numeros das faturas, ATRAVESSANDO ambientes (B-D87/B-D96).
+     *
+     * <p>Passa por {@code app_total_da_fatura} e nao pelo repositorio, e o motivo
+     * e o mesmo do saldo da conta — com uma consequencia pior: a RLS esconde as
+     * compras de quem divide o cartao, e um total que as ignora faz a fatura
+     * <b>parecer menor do que e</b>. O pagamento sairia curto e a pessoa
+     * descobriria com juros.</p>
+     *
+     * <p>Uma consulta para a tela inteira, e nao uma por fatura: o
+     * {@code CROSS JOIN LATERAL} chama a funcao uma vez por linha de
+     * {@code fatura} sem a aplicacao enviar a lista de ids — quem enumera e a
+     * propria tabela, que a RLS ja filtra.</p>
+     */
+    @SuppressWarnings("unchecked")
     private List<Item> comNumeros(List<Fatura> lista, UUID cartaoId, LocalDate hoje) {
         if (lista.isEmpty()) {
             return List.of();
         }
 
+        // O ESCOPO do numero depende de quem pergunta (B-D110), e este e o unico
+        // lugar do sistema em que a mesma pergunta tem duas respostas legitimas:
+        //
+        //   o dono ve o total do CONTRATO — e o valor unico que o banco cobra;
+        //   quem recebeu plasticos ve o total DAQUELES plasticos, e mais nada.
+        //
+        // Devolver o total do contrato para ela seria entregar o volume de gastos
+        // dos outros nove plasticos num numero so. E o pagamento nem entra na
+        // conta dela: por B-D107 ela nao paga, e pagamento e movimento do
+        // contrato.
+        boolean doDono = (Boolean) em.createNativeQuery(
+                "SELECT :cartao IN (SELECT app_contas_nao_emprestadas())")
+            .setParameter("cartao", cartaoId)
+            .getSingleResult();
+
+        List<Object[]> linhas = doDono
+            ? em.createNativeQuery("""
+                    SELECT f.id, t.compras, t.pagamentos
+                      FROM fatura f
+                      CROSS JOIN LATERAL app_total_da_fatura(f.id) t
+                     WHERE f.cartao_id = :cartao
+                    """)
+                .setParameter("cartao", cartaoId)
+                .getResultList()
+            : em.createNativeQuery("""
+                    SELECT f.id, coalesce(SUM(t.previsto), 0), 0::numeric
+                      FROM fatura f
+                      JOIN cartao_emitido ce ON ce.cartao_id = f.cartao_id
+                      CROSS JOIN LATERAL app_total_do_plastico(ce.id, f.id) t
+                     WHERE f.cartao_id = :cartao
+                     GROUP BY f.id
+                    """)
+                .setParameter("cartao", cartaoId)
+                .getResultList();
+
         Map<UUID, TotalDaFatura> totais = new HashMap<>();
-        for (TotalDaFatura t : lancamentos.totaisDasFaturas(
-                lista.stream().map(Fatura::getId).toList(), cartaoId)) {
-            totais.put(t.faturaId(), t);
+        for (Object[] l : linhas) {
+            totais.put((UUID) l[0],
+                       new TotalDaFatura((UUID) l[0], (BigDecimal) l[1], (BigDecimal) l[2]));
         }
 
         return lista.stream()
-            .map(f -> new Item(f, totais.getOrDefault(f.getId(),
-                                                      TotalDaFatura.zeradaPara(f.getId())), hoje))
+            .map(f -> new Item(f,
+                               totais.getOrDefault(f.getId(), TotalDaFatura.zeradaPara(f.getId())),
+                               hoje,
+                               doDono))
             .toList();
     }
 
@@ -299,11 +425,34 @@ public class FaturaServico {
     }
 
     private Cartao exigirCartao(UUID ambienteId, UUID cartaoId) {
-        if (vinculos.findById(new ContaAmbiente.Chave(cartaoId, ambienteId)).isEmpty()) {
+        if (vinculos.findById(new ContaAmbiente.Chave(cartaoId, ambienteId))
+                .filter(ContaAmbiente::estaAtivo)
+                .isEmpty()) {
             throw new RecursoNaoEncontrado("Cartao nao encontrado");
         }
         return cartoes.findById(cartaoId)
             .orElseThrow(() -> new RecursoNaoEncontrado("Cartao nao encontrado"));
+    }
+
+    /**
+     * O cartao nasceu neste ambiente — exigencia de fechar, reabrir e pagar
+     * (B-D107/B-D108).
+     *
+     * <p>{@code pol_fatura_porta} ja recusa no banco; a checagem aqui existe
+     * porque a recusa da politica nao produz erro — o UPDATE nao encontra a linha,
+     * e o Hibernate transforma isso num 500 sobre estado obsoleto.</p>
+     */
+    private void exigirCartaoNaoEmprestado(UUID ambienteId, UUID cartaoId) {
+        boolean emprestado = vinculos.findById(new ContaAmbiente.Chave(cartaoId, ambienteId))
+            .map(v -> !v.isOrigem())
+            .orElse(false);
+
+        if (emprestado) {
+            throw new OperacaoNaoPermitida(
+                "Este cartao foi dividido com voce. Fechar a fatura voce pode;"
+                    + " reabrir desfaz o fechamento para as duas pessoas, e e de quem"
+                    + " abriu o contrato.");
+        }
     }
 
     private Conta exigirContaUtilizavel(UUID ambienteId, UUID contaId) {
@@ -355,7 +504,16 @@ public class FaturaServico {
      * coluna de status, e nao precisaria: guardar o que se calcula em duas somas
      * seria criar um numero para reconciliar.</p>
      */
-    public record Item(Fatura fatura, TotalDaFatura numeros, LocalDate hoje) {
+    /**
+     * Uma fatura com os numeros que QUEM PERGUNTA pode ver (B-D110).
+     *
+     * <p>{@code doContrato} falso significa que {@code numeros} soma apenas os
+     * plasticos de quem esta olhando — e que {@code quitacao} nao tem sentido
+     * nenhum ali, porque quem paga e o dono (B-D107). A tela usa o marcador para
+     * nao exibir estado de pagamento a quem nao paga.</p>
+     */
+    public record Item(Fatura fatura, TotalDaFatura numeros, LocalDate hoje,
+                       boolean doContrato) {
 
         public com.raspybank.lancamento.dominio.CicloFatura ciclo() {
             return fatura.ciclo();

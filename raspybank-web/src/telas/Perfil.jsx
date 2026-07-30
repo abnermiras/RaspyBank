@@ -1,6 +1,10 @@
 import { useCallback, useState } from 'react'
 import { lerErro } from '../api/cliente.js'
-import { ambientes as apiAmbientes, perfil as apiPerfil } from '../api/recursos.js'
+import {
+  acessos as apiAcessos,
+  ambientes as apiAmbientes,
+  perfil as apiPerfil,
+} from '../api/recursos.js'
 import Aviso from '../componentes/Aviso.jsx'
 import { useAutenticacao } from '../contexto/Autenticacao.jsx'
 import { useCarregar } from '../ganchos/useCarregar.js'
@@ -17,9 +21,11 @@ import { data } from '../util/formato.js'
 // existir recuperação de senha, um e-mail digitado errado trancaria a pessoa
 // para fora da própria conta, sem volta.
 //
-// COMPARTILHAMENTO nasce desabilitado de propósito. O desenho ainda não existe,
-// e um botão que promete e não entrega é pior que um botão ausente — mas o
-// lugar dele já fica marcado, para a conversa ter onde cair.
+// COMPARTILHAMENTO (V15, §4j): "é como se eu desse a minha senha para a
+// pessoa, mas ao invés de dar minha senha dei meu acesso". Quem recebe vê o
+// ambiente na própria lista e trabalha DENTRO dele — as categorias, contas e
+// o mapa são os do dono, e toda ação fica carimbada com quem a fez. Dinheiro
+// é de todos; porta (convidar, remover) é só do dono (B-D76).
 // =============================================================================
 
 export default function Perfil() {
@@ -139,21 +145,33 @@ export default function Perfil() {
                   {a.id === eu.ambienteAtual && (
                     <span className="etiqueta etiqueta-entrada">ativo</span>
                   )}
+                  {!a.dono && (
+                    <>
+                      <span className="etiqueta">compartilhado comigo</span>
+                      {/* B-D77: qualquer um remove a si mesmo — sem isso a
+                          pessoa ficaria presa num ambiente que não pediu. */}
+                      <button
+                        type="button" className="botao-texto"
+                        disabled={ocupado}
+                        onClick={() => {
+                          if (window.confirm(`Sair de "${a.nome}"? Para voltar, o dono precisa convidar de novo.`)) {
+                            executar(
+                              () => apiAcessos.remover(a.id, eu.usuarioId),
+                              `Você saiu de "${a.nome}".`,
+                            )
+                          }
+                        }}
+                      >
+                        Sair
+                      </button>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>
           </div>
 
-          <div className="bloco-perfil">
-            <h3>Compartilhamento</h3>
-            <p className="dica">
-              Convidar outra pessoa para um ambiente ainda não existe — o
-              desenho está em discussão. Quando existir, é daqui que sai.
-            </p>
-            <button type="button" className="botao-principal botao-pequeno" disabled>
-              Compartilhar ambiente
-            </button>
-          </div>
+          <Compartilhamento ambientes={listaDeAmbientes} usuarioId={eu.usuarioId} />
         </>
       )}
     </section>
@@ -255,6 +273,148 @@ function FormularioDeSenha({ ocupado, aoGravar }) {
         </button>
       </div>
     </form>
+  )
+}
+
+/**
+ * A porta do ambiente: quem está dentro, convidar, remover.
+ *
+ * Só aparecem aqui os ambientes em que a pessoa é DONA — mexer na porta é do
+ * dono (B-D76). O convite é por e-mail e vale na hora, sem aceite (B-D80): o
+ * ambiente aparece na lista da pessoa e ela sai com um clique se não quiser.
+ */
+function Compartilhamento({ ambientes, usuarioId }) {
+  const proprios = ambientes.filter((a) => a.dono)
+  const [ambienteId, setAmbienteId] = useState(proprios[0]?.id ?? '')
+
+  const buscar = useCallback(
+    () =>
+      ambienteId
+        ? apiAcessos.listar(ambienteId)
+        : Promise.resolve({ ok: true, status: 200, corpo: { acessos: [] } }),
+    [ambienteId],
+  )
+  const { dados, carregando, erro, recarregar } = useCarregar(buscar)
+
+  const [aviso, setAviso] = useState(null)
+  const [ocupado, setOcupado] = useState(false)
+
+  async function executar(acao, mensagemDeSucesso) {
+    setOcupado(true)
+    setAviso(null)
+    try {
+      const resposta = await acao()
+      if (!resposta.ok) {
+        setAviso({ texto: lerErro(resposta).mensagem, sucesso: false })
+        return false
+      }
+      setAviso({ texto: mensagemDeSucesso, sucesso: true })
+      await recarregar()
+      return true
+    } catch {
+      setAviso({ texto: 'Servidor indisponível.', sucesso: false })
+      return false
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  const lista = dados?.acessos ?? []
+
+  return (
+    <div className="bloco-perfil">
+      <h3>Compartilhamento</h3>
+
+      <p className="dica">
+        Compartilhar um ambiente é dar o seu acesso a ele: a pessoa vê e mexe em
+        tudo que é <strong>dinheiro</strong> — lançamentos, contas, cartões,
+        faturas — e cada ação fica registrada com o nome de quem a fez. Convidar
+        e remover acesso continuam só com você.
+      </p>
+
+      {proprios.length === 0 && (
+        <p className="dica">Você não é dono de nenhum ambiente para compartilhar.</p>
+      )}
+
+      {proprios.length > 0 && (
+        <>
+          <div className="campos-lado-a-lado">
+            <label>
+              Ambiente
+              <select
+                value={ambienteId}
+                onChange={(e) => setAmbienteId(e.target.value)}
+                disabled={proprios.length < 2}
+              >
+                {proprios.map((a) => (
+                  <option key={a.id} value={a.id}>{a.nome}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <Aviso aviso={aviso} />
+          {erro && <p className="aviso" role="alert">{erro}</p>}
+          {carregando && <p className="carregando">Carregando…</p>}
+
+          {!carregando && (
+            <ul className="lista-ambientes">
+              {lista.map((acesso) => (
+                <li key={acesso.usuarioId}>
+                  <span className="nome-recurso">{acesso.nome}</span>
+                  <span className="texto-fraco"> {acesso.email}</span>
+                  {acesso.dono && <span className="etiqueta etiqueta-entrada">dono</span>}
+                  {!acesso.dono && (
+                    <button
+                      type="button" className="botao-texto"
+                      disabled={ocupado}
+                      onClick={() => {
+                        if (window.confirm(`Remover o acesso de ${acesso.nome}? A revogação vale na hora.`)) {
+                          executar(
+                            () => apiAcessos.remover(ambienteId, acesso.usuarioId),
+                            `Acesso de ${acesso.nome} removido.`,
+                          )
+                        }
+                      }}
+                    >
+                      {acesso.usuarioId === usuarioId ? 'Sair' : 'Remover'}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault()
+              const formulario = e.target
+              const email = new FormData(formulario).get('email').trim()
+              const deu = await executar(
+                () => apiAcessos.conceder(ambienteId, email),
+                `Pronto: ${email} já está dentro. Não há aceite — o ambiente já aparece na lista da pessoa.`,
+              )
+              if (deu) formulario.reset()
+            }}
+          >
+            <div className="campos-lado-a-lado">
+              <label>
+                Convidar por e-mail
+                <input
+                  type="email" name="email" required
+                  placeholder="pessoa@exemplo.com"
+                />
+              </label>
+            </div>
+            <div className="acoes-linha">
+              <button type="submit" className="botao-principal botao-pequeno" disabled={ocupado}>
+                Dar acesso
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+    </div>
   )
 }
 

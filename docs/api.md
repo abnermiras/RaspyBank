@@ -38,8 +38,21 @@ Categoria e subcategoria **arquivam** (B-D4); conta **encerra** (F7); lançament
 | `POST` | `/api/auth/renovar` | Rotação atômica (B-T3). Aceita `ambienteId` opcional e o preserva (B-T6) |
 | `POST` | `/api/auth/logout` | Revoga só a família da sessão atual — este dispositivo (B-T5) |
 | `POST` | `/api/auth/logout-todos` | Revoga todas as famílias do usuário |
-| `GET` | `/api/perfil` | Usuário, ambiente atual, canal, ambientes visíveis (filtrados por RLS) |
+| `GET` | `/api/perfil` | Usuário, ambiente atual, canal, ambientes visíveis (filtrados por RLS). Devolve `telegramId` desde a V18, **somente leitura** |
 | `POST` | `/api/sessao/ambiente` | Troca o ambiente ativo. **403** se não houver vínculo (B-T7) |
+
+### `POST /api/auth/cadastro` — o campo `telegramId` (V18, 29/07/2026)
+
+```json
+{ "nome": "Abner", "email": "...", "senha": "...", "telegramId": "@abner" }
+```
+
+**Opcional.** É ele que vai ligar a pessoa ao bot (etapa 3 do roteiro); a coluna existe desde a V1 e o caminho de escrita chegou na V18.
+
+- **Vazio ou ausente vira `NULL`**, e isso não é detalhe: `ux_usuario_telegram` é um índice **parcial** (só não-nulos). String vazia gravada seria um valor *real* para o índice, e o segundo cadastro sem Telegram falharia por duplicidade num campo que ninguém preencheu.
+- **409** quando o mesmo Telegram já está em outra conta — duas contas apontando para o mesmo destino fariam o bot não saber para quem lançar.
+- **A validação é frouxa de propósito:** aceita o id numérico (`123456789`) e o usuário (`@abner`). O bot ainda não existe, e uma regra apertada agora tem chance de barrar justamente o valor certo; enquanto não há consumidor, valor errado não causa dano. Quando o bot chegar, ele aperta com a forma que exigir.
+- **Não existe caminho de edição ainda.** `GET /api/perfil` devolve o valor para conferência, e nada mais. Fica registrado como pendência pequena: quem digitar errado hoje não tem como corrigir sozinho.
 
 ---
 
@@ -548,6 +561,344 @@ O gasto de cartão entra no mapa no **mês da fatura** (B-D54), não no mês da 
 | `403` | `contaBancoId` é conta física (B-D41); mover lançamento para fatura fechada |
 | `404` | Cartão, emitido ou fatura inexistente, ou de outro ambiente seu (B-D21) |
 | `409` | Fechar fatura já fechada; reabrir fatura não fechada |
+
+---
+
+## 2c. Compartilhamento de ambiente — IMPLEMENTADO na V15 (29/07/2026)
+
+> Escrita como desenho na varredura que precedeu a V15 e implementada no mesmo dia. Decisões em `decisoes.md` §4j (B-D74 a B-D84); o que a implementação acrescentou ao desenho está marcado como **[V15]** ao longo da seção e consolidado em §4j.
+
+### A ideia, na frase dele
+
+*"É como se eu desse a minha senha para a pessoa, mas ao invés de dar minha senha dei meu acesso."*
+
+Quem recebe o acesso vê o ambiente na própria lista, entra nele pelo seletor de sempre, e a partir dali **trabalha dentro dele**: as categorias são as do dono, as contas são as do dono, o mapa é o do dono. Toda ação fica carimbada com o nome de quem a fez.
+
+### `POST /api/ambientes/{id}/acessos`
+```json
+{ "email": "luciana@exemplo.com" }
+```
+
+Concede acesso **imediato**, sem aceite (B-D80). Responde **404** se não houver usuário com aquele e-mail — e isso é um oráculo de enumeração, aceito conscientemente (B-D81): a alternativa esconderia o erro mais comum, que é digitar o e-mail do próprio conhecido errado.
+
+Só o **dono** concede. **403** para quem tem acesso mas não é dono.
+
+**[V15]** Sucesso responde **201** com a lista de acessos resultante (mesmo formato do GET abaixo), no padrão de `POST /api/ambientes`.
+
+### `GET /api/ambientes/{id}/acessos`
+```json
+{
+  "acessos": [
+    { "usuarioId": "0198...", "nome": "Abner",   "email": "...", "dono": true  },
+    { "usuarioId": "0198...", "nome": "Luciana", "email": "...", "dono": false }
+  ]
+}
+```
+
+O dono vem primeiro, o resto na ordem de chegada. Qualquer membro vê a lista: quem compartilha finanças precisa saber com quem compartilha.
+
+**[V15]** `GET /api/ambientes` (§2b) e a lista de ambientes do perfil ganharam **`dono`** em cada item: com compartilhamento, a lista mistura ambientes próprios e emprestados, e a tela precisa saber onde há porta (convidar, remover) e onde marcar "compartilhado comigo".
+
+### `DELETE /api/ambientes/{id}/acessos/{usuarioId}`
+
+**O dono remove qualquer um; qualquer um remove a si mesmo; o dono não sai** (B-D77). Sem a segunda regra, quem recebeu acesso ficaria preso num ambiente que não pediu; sem a terceira, sobraria um ambiente órfão que ninguém pode mais administrar.
+
+**[V15]** Sucesso responde **204**, sem corpo.
+
+> **Quem estava dentro na hora da revogação.** O JWT já carrega aquele `ambienteId` e vale mais quinze minutos. A RLS para de devolver dados imediatamente — nada indevido aparece —, mas a tela ficaria vazia e sem explicação.
+>
+> Resolvido por **B-D83**: toda requisição confere se o ambiente do token ainda pertence a quem o apresenta, e responde **403 com frase** quando não pertence. A tela lê isso e volta para um ambiente que é dela.
+>
+> **[V15]** O corpo do 403 carrega um marcador **estável** além da frase:
+>
+> ```json
+> { "erro": "Voce nao tem mais acesso a este ambiente",
+>   "motivo": "SEM_ACESSO_AO_AMBIENTE" }
+> ```
+>
+> A tela decide pelo `motivo`, nunca pela frase — frase muda, marcador não. A conferência vive no filtro JWT (antes do MVC, por isso o corpo é montado à mão, como os 401 de B-A8) e **não cobre `/api/auth/**`**, de propósito: a renovação é a rota de fuga — `ambienteParaRenovacao` já trocava em silêncio para um ambiente próprio quando o declarado não pertence mais, e foi escrita prevendo exatamente este caso. O fluxo completo: 403 com marcador → renovação → token num ambiente da pessoa → a tela recarrega nele e explica o que houve.
+>
+> **Revogar não derruba as sessões dela** (B-D84). Encerrar sessão revoga a *renovação* e não o *acesso*, então o logoff geral nem fecharia a janela — e ainda a deslogaria do ambiente dela, que não tem relação com quem revogou.
+
+### O que o convidado pode e o que não pode
+
+| Pode — é **dinheiro** | Não pode — é **porta** |
+|---|---|
+| Lançar, editar e excluir lançamento de qualquer um | Convidar outra pessoa |
+| Criar, arquivar e desarquivar categoria | Remover o acesso de alguém |
+| Criar, encerrar e reabrir conta | Renomear o ambiente |
+| Criar cartão, emitir, cancelar, encerrar | Apagar o ambiente |
+| Fechar, reabrir e pagar fatura | |
+| Transferir entre contas | |
+
+Renomear está do lado da porta porque o nome é **um só** e aparece na lista de todos, inclusive na do dono.
+
+### A regra que aperta o B-D18
+
+**Vincular e desvincular conta de ambiente passa a exigir ser DONO dos dois lados** (B-D78).
+
+B-D18 dizia "só se vincula conta que já se enxerga", e estava certo para a época — enxergar era sinônimo de ser dono. Com compartilhamento, deixa de ser: a convidada poderia levar a conta conjunta para o ambiente pessoal dela e lançar de lá, invisível ao dono.
+
+**É o que fecha o I-23** (B-D79). Com a regra apertada, todo lançamento daquela conta nasce no mesmo ambiente, e as duas pessoas veem o mesmo saldo, a mesma fatura e o mesmo mapa. Não é contorno: o desenho escolhido simplesmente não cria a divergência.
+
+### Códigos de erro desta seção
+
+| Código | Quando |
+|---|---|
+| `400` | `email` ausente ou malformado |
+| `403` | Não é dono e tentou conceder, remover outro, ou renomear; dono tentando sair |
+| `404` | Nenhum usuário com aquele e-mail; ambiente que não é seu (B-D25) |
+| `409` | Conceder acesso a quem já tem |
+
+---
+
+## 2d. Compartilhamento de CONTA — V16 (29/07/2026)
+
+> Desenho de princípio em `decisoes.md` §4k (B-D85 a B-D91); a execução, discutida antes do código por pedido dele, em B-D92 a B-D97. O cartão neste modo é §4l (B-D98 a B-D103) e sai na V17.
+
+### O outro modo, e a diferença que importa
+
+| | Compartilhar **ambiente** (§2c) | Compartilhar **conta** (aqui) |
+|---|---|---|
+| Onde a pessoa trabalha | Dentro do ambiente do dono | No ambiente **dela** |
+| Categorias | As do dono | As dela |
+| Mapa de gastos | Compartilhado | **Separado** |
+| Saldo e fatura | Compartilhados | Compartilhados |
+| Serve para | "gerimos a casa juntos" | "dividimos uma conta, orçamentos separados" |
+
+A regra que resume tudo: **o saldo atravessa ambientes; a classificação não** (B-D85). Cada um vê todos os movimentos da conta, e só os próprios trazem categoria e descrição.
+
+### `POST /api/contas/{id}/compartilhamentos`
+```json
+{ "email": "luciana@exemplo.com" }
+```
+
+Cria um convite **pendente** — e aqui está a diferença de B-D80: no ambiente o acesso é imediato, na conta há um aceite, porque só ela pode escolher em qual ambiente dela a conta vai aparecer (B-D90).
+
+Só o **dono do ambiente onde a conta nasceu** compartilha (B-D91 + B-D92). Quem recebeu a conta emprestada não a passa adiante, e quem recebeu o *ambiente* também não: repartir acesso é porta.
+
+Responde **201** com a lista de compartilhamentos. **404** para e-mail não cadastrado (B-D81, mesmo oráculo assumido do §2c). **409** quando já existe convite pendente, quando a pessoa já recebeu a conta, e quando a conta está encerrada.
+
+> **Ter acesso ao seu ambiente NÃO impede** (B-D104, corrigido em 29/07/2026). A primeira versão recusava com 409 — *"ela já vê esta conta"* — e era um erro conceitual: confundia **ver** a conta com **ter** a conta. Quem entra no seu ambiente trabalha dentro dele, com as **suas** categorias e no **seu** mapa; a conta dividida aparece no ambiente **dela**, com as categorias dela e no mapa dela. São coisas diferentes, e o §4k abre dizendo que o segundo modo é *complementar* ao primeiro.
+>
+> As duas concessões são **independentes**: revogar a conta não tira o ambiente, e remover o acesso ao ambiente não tira a conta.
+
+### `GET /api/contas/{id}/compartilhamentos`
+```json
+{
+  "compartilhamentos": [
+    { "usuarioId": "0198...", "nome": "Luciana", "email": "...", "situacao": "PENDENTE" },
+    { "usuarioId": "0198...", "nome": "Marina",  "email": "...", "situacao": "ATIVO" }
+  ]
+}
+```
+
+**Não existe campo de ambiente aqui, de propósito.** Em qual ambiente dela a conta entrou é organização da vida dela, e B-D90 já recusou expor isso ao dono quando recusou que ele escolhesse.
+
+### `DELETE /api/contas/{id}/compartilhamentos/{usuarioId}`
+
+Um endpoint para três coisas, no idioma de B-D77: o dono **cancela** um convite pendente, o dono **revoga** um acesso ativo, e qualquer um **sai** da conta que recebeu. **204**.
+
+> **Revogar não apaga nada** (B-D93). O vínculo ganha `encerrado_em`: a conta sai da vista dela, e os lançamentos que ela já fez **ficam** — no ambiente dela, com as categorias dela, e continuam somando no saldo do dono. Não é leniência: aquele dinheiro saiu da conta de verdade, e apagá-lo faria o saldo divergir do extrato do banco.
+>
+> O banco, aliás, não deixaria apagar: `fk_lancamento_conta` é `ON DELETE RESTRICT`, então o `DELETE` do vínculo é recusado a partir do primeiro lançamento dela.
+
+### `GET /api/convites`
+```json
+{
+  "convites": [
+    { "id": "0198...",
+      "conta": { "nome": "Conjunta Itaú", "natureza": "ATIVO" },
+      "de":    { "nome": "Abner", "email": "..." } }
+  ]
+}
+```
+
+Os convites de conta pendentes **para mim**. A tela mostra isso onde a pessoa entrar, porque um convite que ninguém vê é um convite que não existe.
+
+### `POST /api/convites/{id}/aceitar`
+```json
+{ "ambienteId": "0198..." }
+```
+
+**O `ambienteId` é obrigatório e é o ponto do aceite** (B-D90). Cair no ambiente ativo mandaria a conta doméstica para o PJ sem aviso, e os gastos iriam para o mapa errado até alguém notar — e notar é difícil, porque nada avisa.
+
+**404** para convite que não é dela, e **404** também para ambiente que não é dela ou onde ela não é dona — pelo idioma de B-D25, que já valia no §2c: ambiente alheio é indistinguível de ambiente inexistente, e distinguir transformaria a API num oráculo sobre quais ids existem. **400** fica para `ambienteId` ausente ou malformado. Sucesso: **201** com a conta, já no formato de `GET /api/contas`.
+
+Aceitar dentro de um ambiente que ela **recebeu emprestado** (§2c) é recusado junto: espalharia a conta para o dono daquele ambiente, que não participou de nada disto.
+
+### `DELETE /api/convites/{id}`
+
+Recusa. **204**. O convite recusado **desaparece** (B-D94) — a trilha de quem convidou e quem recusou fica em `registro_auditoria`, não numa coluna de situação que passaria a ser uma segunda fonte da verdade sobre quem tem acesso.
+
+### O que muda em `GET /api/contas`
+
+Cada conta ganha três campos:
+
+```json
+{ "origem": true, "compartilhada": true, "recebidaDe": null }
+```
+
+- **`origem`** — a conta nasceu neste ambiente. É quem responde "há porta aqui?": renomear, encerrar, mexer nas formas de pagamento e compartilhar só aparecem quando `origem` é `true` (B-D95).
+- **`compartilhada`** — existe pelo menos um vínculo ativo fora daqui. Explica na tela por que o saldo é maior do que a soma dos lançamentos visíveis.
+- **`recebidaDe`** — `{ "nome": "Abner" }` na conta emprestada, nulo na própria.
+
+O **saldo** dessas contas passa a vir de `app_saldo_da_conta` e atravessa ambientes (B-D87/B-D96): os dois veem o mesmo número, que é o que bate com o extrato do banco.
+
+### `GET /api/contas/{id}/extrato?mes=2026-07`
+
+Endpoint novo, e é onde a conta se confere contra o banco. Ele **atravessa ambientes**; o extrato do mês (§5, `GET /api/lancamentos`) continua sendo o do **ambiente** e não atravessa — são duas perguntas diferentes, e a que bate com o banco é esta.
+
+```json
+{
+  "lancamentos": [
+    { "id": "0198...", "meu": true,
+      "data": "2026-07-14", "tipo": "SAIDA", "valor": "89.90",
+      "formaPagamento": "PIX", "situacao": "REALIZADO",
+      "descricao": "Mercado", "categoria": { "nome": "Alimentação" },
+      "quem": { "nome": "Abner" } },
+
+    { "id": "0198...", "meu": false,
+      "data": "2026-07-15", "tipo": "SAIDA", "valor": "240.00",
+      "formaPagamento": "DEBITO", "situacao": "REALIZADO",
+      "quem": { "nome": "Luciana" } }
+  ]
+}
+```
+
+**A linha alheia não tem `descricao` nem `categoria`** (B-D89), e não é a tela que os omite: `app_extrato_da_conta` não devolve essas colunas do lançamento de outro ambiente (B-D97). O que a tela nunca recebeu, ela não vaza.
+
+Descrição fica de fora junto com a categoria pelo mesmo motivo prático: é texto livre, e é onde as pessoas escrevem o que não pretendiam dividir — *"presente da Luciana"* é exatamente o caso.
+
+> **A consequência de privacidade, dita em voz alta** (B-D88): cada um passa a saber que um valor se moveu sem ver no quê. É o próprio ponto de uma conta dividida, mas é escolha, não detalhe técnico.
+
+### O que ela pode e o que não pode, na conta emprestada
+
+| Pode | Não pode |
+|---|---|
+| Lançar, editar e excluir **os próprios** lançamentos | Renomear a conta |
+| Ver saldo e extrato completos da conta | Encerrar ou reabrir a conta |
+| Transferir de e para a conta | Mexer nas formas de pagamento aceitas |
+| Pagar fatura, se for cartão (§4l, V17) | Compartilhar a conta com um terceiro |
+| Sair da conta a qualquer momento | Desvincular a conta do ambiente do dono |
+
+As duas últimas da coluna direita eram possíveis no banco depois da V15, e é o Achado 1 de §4k: sem a coluna `origem`, "conta própria" passava a incluir a conta emprestada, e o RLS entregava à convidada o poder de fazer a conta desaparecer do ambiente de quem a criou.
+
+### Códigos de erro desta seção
+
+| Código | Quando |
+|---|---|
+| `400` | `email` ausente ou malformado; `ambienteId` ausente |
+| `403` | Não é dono da conta e tentou compartilhar, revogar, renomear, encerrar ou mexer nas formas |
+| `404` | E-mail não cadastrado; conta que não aparece no seu ambiente (B-D25); convite que não é seu; ambiente de destino que não é seu, ou onde você não é dono |
+| `409` | Convite pendente repetido; pessoa que já recebeu a conta; conta encerrada |
+
+---
+
+## 2e. Cartão dividido POR PLÁSTICO — V19 (30/07/2026)
+
+> Decisões em `decisoes.md` §4l (B-D98 a B-D103) e **§4n (B-D106 a B-D110), que revoga três delas**. Esta seção foi reescrita: a V17 fez a unidade ser a conta do contrato, e o uso mostrou que estava errado.
+
+### A unidade é o plástico, nunca o contrato
+
+Descrição dele: *"tenho um contrato com limite total de 30 mil; crio um adicional em nome da Luciana que eu posso opcionalmente dizer que tem 1.000 dentro dos meus 30.000. A questão do compartilhamento é poder dar para ela, lá no meio de pagamento, a possibilidade de apontar este cartão adicional que está em nome dela porém **dentro da minha fatura**."*
+
+```
+GET    /api/cartoes/{cartaoId}/emitidos/{emitidoId}/compartilhamentos
+POST   /api/cartoes/{cartaoId}/emitidos/{emitidoId}/compartilhamentos      { "email": "..." }
+DELETE /api/cartoes/{cartaoId}/emitidos/{emitidoId}/compartilhamentos/{usuarioId}
+```
+
+**Dividir a CONTA de um cartão responde 403** (B-D106), com a frase apontando este caminho. Era o que a V17 permitia, e entregava os dez plásticos de uma vez.
+
+O aceite é o de sempre (B-D90): `POST /api/convites/{id}/aceitar` com o `ambienteId` escolhido por quem recebe. O convite diz **o que** está sendo oferecido:
+
+```json
+{ "convites": [ {
+    "id": "0198...",
+    "conta": { "id": "0198...", "nome": "Black", "natureza": "PASSIVO" },
+    "de": { "nome": "Abner", "email": "..." },
+    "plastico": { "id": "0198...", "titular": "Assinaturas",
+                  "tipo": "VIRTUAL", "finalDoCartao": "5678" }
+} ] }
+```
+
+`plastico` nulo = convite de **conta** (§2d); preenchido = convite de **plástico**. Sem essa distinção, ela aceitaria pensando ter recebido a conta do cartão inteira.
+
+**Plástico emitido depois NÃO vai junto** — é o custo de a unidade ser explícita, e tem de ser dividido à parte.
+
+### O que muda em `GET /api/cartoes`
+
+Cada emitido ganha dois números, e eles servem aos dois lados:
+
+```json
+{ "emitidos": [
+    { "id": "...", "nomeTitular": "Assinaturas", "tipo": "VIRTUAL", "finalDoCartao": "5678",
+      "limiteProprio": "1000.00", "limiteEfetivo": "1000.00", "consumido": "150.00" },
+    { "id": "...", "nomeTitular": "Abner", "tipo": "FISICO", "finalDoCartao": "1234",
+      "limiteProprio": null, "limiteEfetivo": "30000.00", "consumido": "900.00" }
+] }
+```
+
+- **`limiteEfetivo`** é o "1.000 dentro dos 30.000": o limite próprio quando existe, o do contrato quando não (B-D110).
+- **`consumido`** é o que **aquele** plástico gastou, com as parcelas futuras (F23). Do lado de quem abriu o contrato, é o que transforma a fatura nas *mini faturas* do e-mail do banco.
+
+**A lista de `emitidos` de um cartão recebido traz só os plásticos que você recebeu** — e o recorte é da política, não da tela.
+
+### O que ela vê da fatura
+
+```json
+{ "total": "150.00", "escopoDoTotal": "MEUS_PLASTICOS" }
+```
+
+`escopoDoTotal` é um marcador estável, no espírito de `SEM_ACESSO_AO_AMBIENTE`:
+
+- **`CONTRATO`** para quem abriu o cartão — o valor único que o banco cobra, somando os dez plásticos e atravessando ambientes (B-D87);
+- **`MEUS_PLASTICOS`** para quem recebeu um plástico: soma apenas o que ele consumiu.
+
+Com `MEUS_PLASTICOS`, **`pago`, `aPagar` e `quitacao` não são exibidos** pela tela — quem paga a fatura é o dono do contrato (B-D107), e estado de pagamento não faz sentido para quem não paga.
+
+### `GET /api/faturas/{id}/lancamentos`
+
+O extrato **recorta por plástico**, e o filtro deriva da concessão — não é parâmetro:
+
+- quem abriu o contrato vê tudo (as mini faturas);
+- quem recebeu plásticos vê as linhas **daqueles** plásticos, e mais nenhuma.
+
+Na linha do outro, no plástico que os dois usam: **valor, data, o plástico, a parcela e quem** — sem `descricao` e sem `categoria`. B-D89 foi **confirmado** aqui (B-D109): ele considerou reverter, e manteve. O que fica privado, na frase dele, é *"a categoria, pois isso é de cada um"*.
+
+`parcelaNumero`/`parcelaTotal` continuam visíveis (B-D102): as próximas parcelas são dinheiro do dono do contrato preso no limite dele.
+
+### Comprar no plástico dividido
+
+`POST /api/lancamentos` com `cartaoEmitidoId` do plástico recebido. O `contaId` enviado é a **conta do cartão** — o banco do contrato é uma conta de outra pessoa, invisível para quem recebeu, e mandá-lo responderia 403.
+
+A conferência "o cartão pertence a esta conta" **não se aplica** ao cartão dividido: no caminho normal ela impede que escolher Nubank e um cartão do C6 grave a compra no C6 em silêncio; aqui a pergunta *"de qual banco?"* não tem resposta possível do lado de quem recebeu. A checagem não afrouxou — ela deixou de existir num contexto em que não significa nada.
+
+### Quem pode o quê
+
+| Pode — é **dinheiro** | Não pode — é do **contrato** |
+|---|---|
+| Comprar no plástico recebido | Comprar nos outros plásticos (não os vê) |
+| Ver o extrato daquele plástico, de todos | Ver o total da fatura, o pago e o a pagar |
+| Ver o limite e o consumido do plástico | Pagar a fatura |
+| Sair do plástico a qualquer momento | Fechar ou reabrir a fatura |
+| | Emitir plástico, mudar limite, encerrar o cartão |
+| | Repassar o plástico a um terceiro |
+
+**Cada um pagar uma parte é conversa adiada**, não descartada — palavras dele: *"mais pra frente a gente monta uma opção de cada um pagar uma parte e até mesmo ela pagar uma fatura inteira"*.
+
+### Dividir a conta bancária não divide os cartões
+
+E não é regra escrita: **cai da estrutura**. O cartão é uma conta própria (B-D47), e as políticas de `cartao`, `cartao_emitido` e `fatura` olham a conta **do cartão**, nunca a `conta_banco_id`. Quem recebe a conta bancária ganha saldo, extrato e formas de pagamento — e nada de crédito.
+
+### Códigos de erro desta seção
+
+| Código | Quando |
+|---|---|
+| `403` | Dividir a **conta** de um cartão (divida o plástico); repassar plástico recebido; emitir, alterar, encerrar o cartão; fechar, reabrir ou **pagar** a fatura de cartão recebido |
+| `404` | Cartão, plástico ou fatura fora do seu alcance (B-D25); revogar quem não usa o plástico |
+| `409` | Convite de plástico repetido; pessoa que já usa o plástico |
 
 ---
 

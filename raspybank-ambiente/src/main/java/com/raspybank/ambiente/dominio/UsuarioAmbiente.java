@@ -14,6 +14,12 @@ import java.util.UUID;
  * para quem esta dentro. Quem compartilha financas nao tem o que esconder da
  * outra parte, e a separacao de responsabilidade e feita pelo Responsavel,
  * que e dimensao de analise e nao de acesso.</p>
+ *
+ * <p>A V15 acrescentou {@code dono} — um booleano, e NAO um sistema de papeis
+ * (B-D75). Ele responde uma pergunta so, quem abriu a porta, e divide o mundo
+ * em dois: mexer no DINHEIRO (todos) e mexer na PORTA — convidar, remover
+ * acesso, renomear, apagar — que e so do dono (B-D76). O acesso total de
+ * RF-M2-04 continua valendo para tudo que e dinheiro.</p>
  */
 @Entity
 @Table(name = "usuario_ambiente")
@@ -28,6 +34,14 @@ public class UsuarioAmbiente {
     @Column(name = "ambiente_id")
     private UUID ambienteId;
 
+    /**
+     * Quem abriu a porta. Exatamente um por ambiente ({@code ux_ua_um_dono}),
+     * e nunca gravado por aqui como verdadeiro: a linha de dono nasce nas
+     * portas estreitas do banco; o que a aplicacao insere e sempre convidado.
+     */
+    @Column(name = "dono", insertable = false, updatable = false)
+    private boolean dono;
+
     @Column(name = "criado_em", insertable = false, updatable = false)
     private OffsetDateTime criadoEm;
 
@@ -41,6 +55,7 @@ public class UsuarioAmbiente {
 
     public UUID getUsuarioId()  { return usuarioId; }
     public UUID getAmbienteId() { return ambienteId; }
+    public boolean isDono()     { return dono; }
 
     /** Chave composta. Exigida pelo JPA quando a primaria tem mais de uma coluna. */
     public static class Chave implements Serializable {

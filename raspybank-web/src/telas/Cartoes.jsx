@@ -6,6 +6,7 @@ import {
   faturas as apiFaturas,
 } from '../api/recursos.js'
 import Aviso from '../componentes/Aviso.jsx'
+import PainelDeCompartilhamento from '../componentes/PainelDeCompartilhamento.jsx'
 import { useCarregar } from '../ganchos/useCarregar.js'
 import { data, dinheiro } from '../util/formato.js'
 import {
@@ -54,6 +55,7 @@ export default function Cartoes() {
   const [abrindo, setAbrindo] = useState(false)
   const [selecionado, setSelecionado] = useState(null)
   const [emitindo, setEmitindo] = useState(null)
+  const [dividindo, setDividindo] = useState(null)
 
   // Os seletores precisam das contas de banco e das formas de pagamento.
   const [apoio, setApoio] = useState({ contas: [], formas: [] })
@@ -174,6 +176,13 @@ export default function Cartoes() {
                     setSelecionado(selecionado === cartao.id ? null : cartao.id)
                   }
                   aoNovoVirtual={() => setEmitindo(cartao)}
+                  aoDividirPlastico={(emitido) =>
+                    setDividindo(
+                      dividindo?.id === emitido.id
+                        ? null
+                        : { ...emitido, cartaoId: cartao.id },
+                    )
+                  }
                   aoEncerrar={() =>
                     executar(
                       () =>
@@ -197,6 +206,29 @@ export default function Cartoes() {
                     )
                   }
                 />
+
+                {/* O painel é do PLÁSTICO (B-D106): o rótulo diz qual, porque
+                    um contrato com dez cartões teria dez painéis idênticos sem
+                    isso. */}
+                {dividindo && dividindo.cartaoId === cartao.id && (
+                  <PainelDeCompartilhamento
+                    recurso={{
+                      id: dividindo.id,
+                      nome: `${cartao.nome} · ${dividindo.nomeTitular}`
+                        + ` ····${dividindo.finalDoCartao}`,
+                    }}
+                    api={{
+                      compartilhamentos: (id) =>
+                        apiCartoes.plasticos.compartilhamentos(cartao.id, id),
+                      compartilhar: (id, email) =>
+                        apiCartoes.plasticos.compartilhar(cartao.id, id, email),
+                      removerCompartilhamento: (id, usuarioId) =>
+                        apiCartoes.plasticos.remover(cartao.id, id, usuarioId),
+                    }}
+                    ehCartao
+                    aoMudar={recarregar}
+                  />
+                )}
 
                 {emitindo?.id === cartao.id && (
                   <FormularioDeVirtual
@@ -235,7 +267,10 @@ export default function Cartoes() {
 
 // ----------------------------------------------------------------------------
 
-function LinhaDeCartao({ cartao, aberto, ocupado, aoAlternar, aoEncerrar, aoNovoVirtual, aoAlternarEmitido }) {
+function LinhaDeCartao({
+  cartao, aberto, ocupado,
+  aoAlternar, aoEncerrar, aoNovoVirtual, aoAlternarEmitido, aoDividirPlastico,
+}) {
   // Pode ser negativo, e isso é informação: o limite estourou. O sistema não
   // trava (B-D48) — quem recusa a compra é o banco de verdade.
   const estourou = Number(cartao.limiteDisponivel) < 0
@@ -256,6 +291,31 @@ function LinhaDeCartao({ cartao, aberto, ocupado, aoAlternar, aoEncerrar, aoNovo
         </span>
         {cartao.encerradoEm && <span className="etiqueta etiqueta-fraca">encerrado</span>}
 
+        {/* V17 — o cartão dividido (§4l). Quem recebeu compra e paga; o contrato
+            continua sendo de quem o abriu. */}
+        {cartao.recebidoDe && (
+          <span
+            className="etiqueta etiqueta-fraca"
+            title={
+              `${cartao.recebidoDe} dividiu este cartão com você. Compre e pague a fatura`
+              + ' à vontade; emitir cartão novo, mudar o limite e encerrar são de quem'
+              + ' abriu o contrato.'
+            }
+          >
+            de {cartao.recebidoDe}
+          </span>
+        )}
+        {cartao.compartilhado && (
+          <span
+            className="etiqueta etiqueta-fraca"
+            title={
+              'Outra pessoa também compra neste cartão. A fatura e o limite consumido'
+              + ' abaixo já somam as compras dos dois.'
+            }
+          >
+            dividido
+          </span>
+        )}
       </div>
 
       {/* Os plásticos e virtuais, cada um com o próprio botão. Encerrar o
@@ -273,34 +333,68 @@ function LinhaDeCartao({ cartao, aberto, ocupado, aoAlternar, aoEncerrar, aoNovo
             <span className="texto-fraco">
               {' '}{e.tipo === 'FISICO' ? 'físico' : 'virtual'} ····{e.finalDoCartao}
             </span>
-            {e.canceladoEm && <span className="etiqueta etiqueta-fraca">cancelado</span>}
-            <button
-              type="button" className="botao-texto"
-              onClick={() => aoAlternarEmitido(e)}
-              disabled={ocupado}
+
+            {/* A "mini fatura" deste plástico: o que ELE gastou, dentro do
+                limite que ele tem — próprio, ou o do contrato quando não há
+                (B-D110). É o formato do e-mail do banco. */}
+            <span
+              className="texto-fraco"
+              title={
+                e.limiteProprio
+                  ? `Limite próprio de ${dinheiro(e.limiteProprio)} dentro do contrato`
+                  : 'Sem limite próprio: usa o limite do contrato'
+              }
             >
-              {e.canceladoEm ? 'Reativar' : 'Cancelar'}
-            </button>
+              {' '}{dinheiro(e.consumido)} de {dinheiro(e.limiteEfetivo)}
+            </span>
+
+            {e.canceladoEm && <span className="etiqueta etiqueta-fraca">cancelado</span>}
+
+            {/* Dividir é POR PLÁSTICO (B-D106). Era no cartão até a V17, e
+                entregava os dez de uma vez. */}
+            {cartao.podeCompartilhar && !e.canceladoEm && (
+              <button
+                type="button" className="botao-texto"
+                onClick={() => aoDividirPlastico(e)}
+                disabled={ocupado}
+              >
+                Dividir
+              </button>
+            )}
+            {cartao.origem && (
+              <button
+                type="button" className="botao-texto"
+                onClick={() => aoAlternarEmitido(e)}
+                disabled={ocupado}
+              >
+                {e.canceladoEm ? 'Reativar' : 'Cancelar'}
+              </button>
+            )}
           </li>
         ))}
       </ul>
 
+      {/* Emitir e encerrar são do contrato (B-D101); dividir é porta (B-D91).
+          Esconder em vez de mostrar-e-recusar: um botão que sempre responde 403
+          é um botão que mente. */}
       <div className="acoes-linha">
-        {!cartao.encerradoEm && (
+        {cartao.origem && !cartao.encerradoEm && (
           <button type="button" className="botao-texto" onClick={aoNovoVirtual} disabled={ocupado}>
             Novo cartão
           </button>
         )}
-        <button
-          type="button" className="botao-texto" onClick={aoEncerrar} disabled={ocupado}
-          title={
-            cartao.encerradoEm
-              ? 'Reabre o contrato. Os cartões emitidos continuam cancelados — reative um a um.'
-              : 'Cancela todos os cartões emitidos e impede compra nova. As faturas em aberto continuam a pagar.'
-          }
-        >
-          {cartao.encerradoEm ? 'Reabrir' : 'Encerrar'}
-        </button>
+        {cartao.origem && (
+          <button
+            type="button" className="botao-texto" onClick={aoEncerrar} disabled={ocupado}
+            title={
+              cartao.encerradoEm
+                ? 'Reabre o contrato. Os cartões emitidos continuam cancelados — reative um a um.'
+                : 'Cancela todos os cartões emitidos e impede compra nova. As faturas em aberto continuam a pagar.'
+            }
+          >
+            {cartao.encerradoEm ? 'Reabrir' : 'Encerrar'}
+          </button>
+        )}
       </div>
 
       <div className="saldos">
@@ -355,6 +449,11 @@ function PainelDeFaturas({ cartao, contas, formas, ocupado, aoMudar, aoAvisar })
 
   const lista = dados?.faturas ?? []
 
+  // O ESCOPO vem do servidor (B-D110), e não de um palpite da tela: para quem
+  // abriu o contrato o total é do CONTRATO — o valor único que o banco cobra —,
+  // e para quem recebeu um plástico é só o que os cartões dele consumiram.
+  const doContrato = lista.length === 0 || lista[0].escopoDoTotal !== 'MEUS_PLASTICOS' 
+
   return (
     <div className="painel-faturas">
       <div className="navegador-mes">
@@ -372,11 +471,17 @@ function PainelDeFaturas({ cartao, contas, formas, ocupado, aoMudar, aoAvisar })
       {lista.length > 0 && (
         <table className="tabela-faturas">
           <thead>
+            {/*
+              Quem recebeu um plástico vê UMA coluna de valor: o que os cartões
+              dele consumiram (escopoDoTotal = MEUS_PLASTICOS). Pago e A pagar são
+              do contrato, e quem paga é o dono (B-D107) — mostrá-los aqui seria
+              exibir estado de pagamento a quem não paga.
+            */}
             <tr>
               <th>Mês</th><th>Vencimento</th><th>Fecha</th><th>Situação</th>
-              <th className="numerico">Total</th>
-              <th className="numerico">Pago</th>
-              <th className="numerico">A pagar</th>
+              <th className="numerico">{doContrato ? 'Total' : 'Seus cartões'}</th>
+              {doContrato && <th className="numerico">Pago</th>}
+              {doContrato && <th className="numerico">A pagar</th>}
               <th />
             </tr>
           </thead>
@@ -386,10 +491,10 @@ function PainelDeFaturas({ cartao, contas, formas, ocupado, aoMudar, aoAvisar })
                 <td>{f.mesReferencia}</td>
                 <td>{data(f.vencimento)}</td>
                 <td className="texto-fraco">{data(f.fechamentoPrevisto)}</td>
-                <td><EtiquetaDeFatura fatura={f} /></td>
+                <td>{doContrato ? <EtiquetaDeFatura fatura={f} /> : <span className="texto-fraco">—</span>}</td>
                 <td className="numerico">{dinheiro(f.total)}</td>
-                <td className="numerico">{dinheiro(f.pago)}</td>
-                <td className="numerico">{dinheiro(f.aPagar)}</td>
+                {doContrato && <td className="numerico">{dinheiro(f.pago)}</td>}
+                {doContrato && <td className="numerico">{dinheiro(f.aPagar)}</td>}
                 <td className="acoes-linha">
                   <button
                     type="button" className="botao-texto"
@@ -397,35 +502,43 @@ function PainelDeFaturas({ cartao, contas, formas, ocupado, aoMudar, aoAvisar })
                   >
                     {vendo?.id === f.id ? 'Fechar' : 'Ver'}
                   </button>
-                  <button
-                    type="button" className="botao-texto"
-                    disabled={ocupado || trabalhando}
-                    onClick={() =>
-                      agir(
-                        () =>
+
+                  {/* Fechar, reabrir e pagar são de quem abriu o contrato
+                      (B-D107/B-D108). Esconder em vez de mostrar-e-recusar: um
+                      botão que sempre responde 403 é um botão que mente. */}
+                  {doContrato && (
+                    <button
+                      type="button" className="botao-texto"
+                      disabled={ocupado || trabalhando}
+                      onClick={() =>
+                        agir(
+                          () =>
+                            f.ciclo === 'ABERTA'
+                              ? apiFaturas.fechar(f.id)
+                              : apiFaturas.reabrir(f.id),
                           f.ciclo === 'ABERTA'
-                            ? apiFaturas.fechar(f.id)
-                            : apiFaturas.reabrir(f.id),
-                        f.ciclo === 'ABERTA'
-                          ? `Fatura de ${f.mesReferencia} fechada.`
-                          : `Fatura de ${f.mesReferencia} reaberta.`,
-                      )
-                    }
-                  >
-                    {f.ciclo === 'ABERTA' ? 'Fechar' : 'Reabrir'}
-                  </button>
-                  <button
-                    type="button" className="botao-texto"
-                    disabled={ocupado || trabalhando || Number(f.aPagar) <= 0}
-                    onClick={() => setPagando(f)}
-                    title={
-                      Number(f.aPagar) <= 0
-                        ? 'Nada a pagar nesta fatura'
-                        : 'Pagar total ou em parte — antecipar libera limite'
-                    }
-                  >
-                    Pagar
-                  </button>
+                            ? `Fatura de ${f.mesReferencia} fechada.`
+                            : `Fatura de ${f.mesReferencia} reaberta.`,
+                        )
+                      }
+                    >
+                      {f.ciclo === 'ABERTA' ? 'Fechar' : 'Reabrir'}
+                    </button>
+                  )}
+                  {doContrato && (
+                    <button
+                      type="button" className="botao-texto"
+                      disabled={ocupado || trabalhando || Number(f.aPagar) <= 0}
+                      onClick={() => setPagando(f)}
+                      title={
+                        Number(f.aPagar) <= 0
+                          ? 'Nada a pagar nesta fatura'
+                          : 'Pagar total ou em parte — antecipar libera limite'
+                      }
+                    >
+                      Pagar
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -493,6 +606,15 @@ function EtiquetaDeFatura({ fatura }) {
  *
  * Sem a coluna do cartão, uma fatura com o físico, dois virtuais e o adicional
  * é uma pilha de gastos sem dono.
+ *
+ * NO CARTÃO DIVIDIDO (V17) a lista mostra as compras dos dois, porque a fatura
+ * soma as duas (B-D87) — uma lista com metade dos gastos nunca fecharia com o
+ * total. A linha da outra pessoa chega sem descrição e sem categoria, e não é
+ * esta tela que as esconde: elas não vêm do servidor (B-D89 via B-D97).
+ *
+ * A PARCELA da compra alheia aparece (B-D102), e é a única coisa que ela revela
+ * a mais: as próximas parcelas são dinheiro seu preso no seu limite, e faturas
+ * de meses que ainda não chegaram já nascem comprometidas.
  */
 function ExtratoDaFatura({ fatura, aoFechar }) {
   const buscar = useCallback(() => apiFaturas.lancamentos(fatura.id), [fatura.id])
@@ -524,10 +646,14 @@ function ExtratoDaFatura({ fatura, aoFechar }) {
           </thead>
           <tbody>
             {gastos.map((g) => (
-              <tr key={g.id}>
+              <tr key={g.id} className={g.meu === false ? 'arquivada' : undefined}>
                 <td>{data(g.dataCompetencia)}</td>
                 <td>
-                  {g.descricao || <span className="texto-fraco">sem descrição</span>}
+                  {g.meu === false ? (
+                    <span className="texto-fraco">compra de {g.quem?.nome}</span>
+                  ) : (
+                    g.descricao || <span className="texto-fraco">sem descrição</span>
+                  )}
                   {g.parcelaTotal && (
                     <span className="etiqueta etiqueta-fraca">
                       {g.parcelaNumero}/{g.parcelaTotal}

@@ -470,7 +470,7 @@ Decisões em `decisoes.md` §4i (B-D70 a B-D73).
 
 O pedido original incluía apagar ambiente e apagar conta, com aviso crítico, senha e digitação do nome. Ao ver o tamanho — todas as cinco chaves estrangeiras que apontam para `ambiente` são `RESTRICT`, então apagar é uma demolição em ordem, e um ambiente compartilhado apagado levaria junto os dados de outra pessoa — ele parou: *"ficou complexo e eu preciso pensar... vamos fazer o básico depois a gente evolui"*.
 
-Ficou: ver os dados, trocar o nome, trocar a senha, criar ambiente. **Compartilhamento aparece na tela desabilitado**, com o lugar marcado para a conversa ter onde cair.
+Ficou: ver os dados, trocar o nome, trocar a senha, criar ambiente. **Compartilhamento aparece na tela desabilitado**, com o lugar marcado para a conversa ter onde cair. *(A conversa caiu ali mesmo: virou a seção 15, no dia seguinte da tela.)*
 
 ### Três coisas que a tela não faz, e por quê
 
@@ -493,3 +493,95 @@ Virou `UsuarioServico`, com o motivo escrito no javadoc. Não é camada por cama
 Achado no caminho: **o inventário mora em dois lugares** — o documento e uma lista codificada no teste. Acrescentar uma função exige tocar nos dois, e o teste só reclama do segundo. Fica como dívida pequena e registrada.
 
 **Verificado em 29/07/2026:** 211 testes verdes, sendo 10 novos em `PerfilApiTest`. V14 aplicada no banco real em 13 ms, e o fluxo conferido por HTTP: perfil com dados, nome trocado sem tocar no e-mail, ambiente "Freelance" criado vazio (0 contas, 4 sistêmicas) sem mudar o ambiente ativo, senha atual errada em 403, e a troca de senha invalidando a antiga.
+
+## 15. Compartilhamento de ambiente na tela (29/07/2026, V15)
+
+O bloco que a T-09 deixou desabilitado virou tela de verdade, no mesmo lugar. Decisões em `decisoes.md` §4j (B-D74 a B-D84); contrato em `api.md` §2c.
+
+### O que a tela faz
+
+- **Perfil › Compartilhamento**: seletor com os ambientes em que a pessoa é **dona** (porta é do dono, B-D76), a lista de quem está dentro — dono marcado, e-mail visível — e o convite por e-mail. O aviso de sucesso diz o que B-D80 decidiu: *não há aceite, o ambiente já aparece na lista da pessoa*.
+- **Perfil › Ambientes**: cada item emprestado ganha a etiqueta "compartilhado comigo" e o botão **Sair** (B-D77: qualquer um remove a si mesmo). Sair pede confirmação — para voltar, só com novo convite.
+- **Seletor da casca**: o ambiente emprestado aparece com o sufixo "· compartilhado". Sem a marca, a pessoa lançaria no lugar errado sem nenhum indício — é a mesma preocupação do B-D2, agora com ambiente alheio na lista.
+
+### A revogação com a pessoa dentro (B-D83, lado do cliente)
+
+O 403 com `motivo: "SEM_ACESSO_AO_AMBIENTE"` é tratado no `cliente.js`, no mesmo nível da renovação por 401 — nenhuma tela precisa saber disso. O fluxo: renovar (o servidor troca em silêncio para um ambiente próprio, `ambienteParaRenovacao`), gravar a explicação no `sessionStorage`, **recarregar a página**.
+
+O recarregar é proposital, pelo mesmo motivo da `key` no Outlet da casca: a tela aberta pertence ao ambiente que a pessoa PERDEU, e um formulário meio preenchido nela iria para o lugar errado. A explicação atravessa o recarregar e a casca a mostra uma vez — "Seu acesso ao ambiente em que você estava foi removido. Você voltou para um ambiente seu." — com o botão *Entendi*.
+
+**Verificado em 29/07/2026:** 227 testes verdes, sendo 16 novos em `CompartilhamentoApiTest` — incluindo a revogação com token vivo (403 com marcador, renovação devolvendo o ambiente próprio, sessão intacta por B-D84) e a conta que NÃO escapa para o ambiente pessoal da convidada, testada por baixo, direto na política (B-D78).
+
+## 16. Conta e cartão divididos na tela (29/07/2026, V16 e V17)
+
+O outro modo de dividir, e ele mora em telas diferentes do §4j: **a pessoa trabalha no ambiente dela**. Decisões em `decisoes.md` §4k e §4l; contrato em `api.md` §2d e §2e.
+
+### Os convites moram na T-05, no topo
+
+Um convite que ninguém vê é um convite que não existe. Ele fica **acima do formulário de conta nova**, na tela onde a conta vai aparecer quando ela aceitar, e cada linha traz um **seletor de ambiente** — obrigatório, sem valor padrão, porque é a escolha que só ela pode fazer (B-D90). Só ambientes de que ela é **dona** entram no seletor: aceitar dentro de um ambiente emprestado (V15) espalharia a conta para o dono daquele ambiente, que não participou de nada.
+
+Cair no ambiente ativo seria o pior padrão possível: mandaria a conta doméstica para o PJ sem aviso, e os gastos iriam para o mapa errado até alguém notar — e notar é difícil, porque nada avisa.
+
+### Dois campos decidem os botões, e confundi-los foi um defeito real
+
+- **`origem`** — a conta nasceu neste ambiente: libera *Renomear*, *Formas* e *Encerrar*, que são **dinheiro** e valem também para quem entrou no ambiente por convite (B-D76).
+- **`podeCompartilhar`** — sou dono do ambiente onde ela nasceu: libera *Dividir*, que é **porta** (B-D91).
+
+A tela **esconde** o que a pessoa não pode fazer, em vez de mostrar e deixar o servidor recusar: um botão que sempre responde 403 é um botão que mente. A primeira versão do código usou um campo só para as duas perguntas, e o sintoma foi um 500 na tela de contas de quem entrou no ambiente por convite.
+
+### As etiquetas dizem coisas diferentes
+
+- **"de Abner"** — conta ou cartão que você recebeu. O título explica o que você pode fazer com ela.
+- **"dividida" / "dividido"** — outra pessoa também lança aqui. Ela existe para explicar o saldo: com o número atravessando ambientes (B-D87), a soma dos lançamentos visíveis **não fecha** com o saldo mostrado, e sem a marca isso pareceria erro de conta.
+- **"em N ambientes"** — a conta aparece em mais de um ambiente **seu** (B-D18). Antes da V16 esta era a etiqueta "compartilhada", e ela mentia por omissão: a lista só traz os ambientes de quem está olhando, então a conta dividida com outra pessoa aparecia como não compartilhada.
+
+### O extrato da conta é uma tela nova, e é ela que bate com o banco
+
+`GET /api/contas/{id}/extrato` atravessa ambientes; o extrato do mês (T-08) continua sendo o do **ambiente** e não atravessa. São duas perguntas diferentes, e misturá-las faria uma delas mentir.
+
+A linha da outra pessoa aparece como *"movimento de Luciana"*, com valor, data e forma de pagamento — **sem descrição e sem categoria** (B-D89). E não é a tela que as omite: elas não vêm do servidor (B-D97). O que a tela nunca recebeu, ela não vaza.
+
+### O cartão dividido reusa o painel, e ganha uma linha no combo
+
+O painel de divisão é **o mesmo componente** para conta e cartão, porque dividir cartão é dividir a conta do contrato (B-D98) — dois painéis seriam a mesma pergunta feita duas vezes. Só o texto muda.
+
+Na T-08, o cartão dividido **não fica embaixo de nenhuma conta sua**: o banco do contrato é uma conta de outra pessoa, e o agrupamento "banco → cartões" de B-D61 não tem onde se apoiar. Ele aparece para qualquer conta sua, marcado *"(de Abner)"*.
+
+No extrato da fatura, a compra alheia aparece como *"compra de Luciana"* com o plástico e a **parcela** — `1/10` (B-D102) — e sem descrição nem categoria. A parcela é a única coisa que a fatura revela a mais que a conta, e o motivo está escrito: as próximas são dinheiro do dono do contrato preso no limite dele.
+
+**Verificado em 29/07/2026:** 221 testes verdes no backend (21 novos em `CompartilhamentoContaApiTest`, 8 em `CartaoCompartilhadoApiTest`) e `make web-test` verde. Dois defeitos foram achados **pelos testes**, não pela leitura: o convidado do ambiente perdendo o direito de encerrar conta (regressão da V15, apanhada por um teste que já existia) e o limite consumido do cartão ignorando as compras de quem divide — o número que B-D48 diz existir para bater com o app do banco.
+
+## 17. O plástico como unidade na tela (30/07/2026, V19)
+
+A seção 16 saiu ontem e esta corrige a parte dela que estava errada. Decisões em `decisoes.md` §4n (B-D106 a B-D110).
+
+### O botão "Dividir" desceu do cartão para o plástico
+
+Era no cartão, e entregava os dez de uma vez. Agora cada linha de emitido tem o seu, e o painel de divisão diz **qual** plástico está sendo dividido — `Black · Assinaturas ····5678` — porque um contrato com dez cartões teria dez painéis idênticos sem isso.
+
+Dividir a **conta** de um cartão responde 403 com a frase apontando o caminho. O botão nem aparece: a tela de contas não lista cartões (B-D62).
+
+### Cada plástico mostra o próprio número
+
+`consumido de limiteEfetivo` na linha do emitido — os "1.000 dentro dos 30.000", ou o limite do contrato quando o plástico não tem próprio. É o formato do e-mail do banco, e serve aos dois lados: do dono, é a mini fatura de cada cartão; de quem recebeu, é o único número de limite que existe para ele.
+
+### A tabela de faturas tem duas formas
+
+O servidor manda `escopoDoTotal`, e a tela obedece:
+
+- **`CONTRATO`** — colunas Total, Pago e A pagar, a etiqueta de situação e os botões Fechar/Reabrir/Pagar.
+- **`MEUS_PLASTICOS`** — uma coluna só, *"Seus cartões"*, sem situação e sem botão de ação. Quem paga a fatura é o dono do contrato (B-D107), e exibir estado de pagamento a quem não paga seria mentir sobre o que aquele número significa.
+
+Nada disso é palpite da tela: o marcador vem da API, como `SEM_ACESSO_AO_AMBIENTE`.
+
+### O extrato da fatura recorta por plástico
+
+Quem recebeu vê as compras **daquele** plástico — as dele e as do dono, porque é o caso do cartão de assinaturas que os dois usam — e nenhuma dos outros nove. A linha do outro aparece como *"compra de Abner"* com o plástico e a parcela, **sem descrição e sem categoria**: B-D89 foi confirmado aqui (B-D109).
+
+### O que ficou de fora, e é decisão dele
+
+Na descrição dele, o combo de meio de pagamento dela mostraria o **banco Nubank** como grupo, e dentro dele o virtual compartilhado. A tela hoje mostra o plástico marcado `(de Abner)` sob as contas dela — o cartão aparece e funciona, mas o nome do banco não.
+
+O motivo é estrutural: o banco do contrato é uma conta que ela **não enxerga**, e expor o nome dele exigiria mais uma função `SECURITY DEFINER`. Fica registrado como pergunta aberta, porque a resposta é dele: mostrar o nome significa ela saber em qual banco ele tem conta.
+
+**Verificado em 30/07/2026:** 227 testes verdes, sendo 12 no `CartaoCompartilhadoApiTest` reescrito, e `make web-test` verde.

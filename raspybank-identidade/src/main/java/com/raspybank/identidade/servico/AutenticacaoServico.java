@@ -67,14 +67,20 @@ public class AutenticacaoServico {
      * impasse por uma porta unica e auditavel.</p>
      */
     @Transactional
-    public UUID cadastrar(String nome, String email, String senha) {
+    public UUID cadastrar(String nome, String email, String senha, String telegramId) {
         String hash = codificador.encode(senha);
 
+        // O telegram entra na MESMA insercao, e nao num UPDATE depois (V18): no
+        // cadastro nao ha identidade na sessao, e pol_usuario_escrita
+        // (id = app_usuario_id()) recusaria a segunda instrucao. Por isso a
+        // funcao ganhou um quarto parametro em vez de a aplicacao completar o
+        // registro em dois passos.
         Object id = em.createNativeQuery(
-                "SELECT auth_cadastrar_usuario(:nome, :email, :hash)")
+                "SELECT auth_cadastrar_usuario(:nome, :email, :hash, :telegram)")
             .setParameter("nome", nome)
             .setParameter("email", email)
             .setParameter("hash", hash)
+            .setParameter("telegram", telegramId)
             .getSingleResult();
 
         return (UUID) id;

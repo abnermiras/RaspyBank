@@ -5,17 +5,23 @@ import com.raspybank.ambiente.servico.AmbienteServico;
 import com.raspybank.lancamento.dominio.Conta;
 import com.raspybank.lancamento.dominio.ContaFormaPagamento;
 import com.raspybank.lancamento.dominio.FormaPagamento;
+import com.raspybank.lancamento.dominio.LinhaDoExtrato;
 import com.raspybank.lancamento.dominio.NaturezaConta;
-import com.raspybank.lancamento.dominio.SaldoDaConta;
+import com.raspybank.lancamento.dominio.SituacaoLancamento;
+import com.raspybank.lancamento.dominio.TipoLancamento;
+import com.raspybank.lancamento.servico.CompartilhamentoContaServico;
 import com.raspybank.lancamento.servico.ContaServico;
 import com.raspybank.shared.contexto.ContextoRequisicao;
 import com.raspybank.shared.erro.OperacaoNaoPermitida;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,11 +35,11 @@ import org.springframework.web.bind.annotation.RestController;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -62,10 +68,14 @@ public class ContaControlador {
 
     private final ContaServico contas;
     private final AmbienteServico ambientes;
+    private final CompartilhamentoContaServico compartilhamentos;
 
-    public ContaControlador(ContaServico contas, AmbienteServico ambientes) {
+    public ContaControlador(ContaServico contas,
+                            AmbienteServico ambientes,
+                            CompartilhamentoContaServico compartilhamentos) {
         this.contas = contas;
         this.ambientes = ambientes;
+        this.compartilhamentos = compartilhamentos;
     }
 
     @GetMapping
@@ -151,6 +161,77 @@ public class ContaControlador {
     public ContaResposta reabrir(@PathVariable UUID id) {
         contas.reabrir(ambienteAtivo(), id);
         return resposta(id);
+    }
+
+    // =========================================================================
+    // Extrato e compartilhamento (V16) — §2d
+    // =========================================================================
+
+    /**
+     * O extrato da conta, e e aqui que ela se confere contra o banco.
+     *
+     * <p><b>Este endpoint atravessa ambientes</b> (B-D87); o extrato do mes
+     * ({@code GET /api/lancamentos}) continua sendo o do ambiente e nao
+     * atravessa. Sao duas perguntas diferentes, e a que bate com o extrato do
+     * banco e esta — sem ela, o saldo da conta compartilhada nunca fecharia com
+     * a lista de lancamentos que a tela mostra.</p>
+     *
+     * <p>A linha alheia vem sem descricao e sem categoria (B-D89), e nao e este
+     * controlador que as omite: {@code app_extrato_da_conta} nao devolve essas
+     * colunas (B-D97).</p>
+     */
+    @GetMapping("/{id}/extrato")
+    public Map<String, Object> extrato(
+            @PathVariable UUID id,
+            @RequestParam @DateTimeFormat(pattern = "yyyy-MM") YearMonth mes) {
+
+        List<LinhaDoExtrato> linhas = contas.extrato(
+            ambienteAtivo(), id, mes.atDay(1), mes.atEndOfMonth());
+
+        return Map.of("lancamentos", linhas.stream().map(LinhaResposta::de).toList());
+    }
+
+    @GetMapping("/{id}/compartilhamentos")
+    public Map<String, Object> listarCompartilhamentos(@PathVariable UUID id) {
+        return Map.of("compartilhamentos",
+            compartilhamentos.listar(ambienteAtivo(), id).stream()
+                .map(CompartilhamentoResposta::de)
+                .toList());
+    }
+
+    /**
+     * Compartilha a conta com quem tem o e-mail informado (B-D90/B-D91).
+     *
+     * <p>Cria um convite PENDENTE, e nao um acesso: no ambiente o acesso e
+     * imediato (B-D80), aqui ha uma escolha que so quem recebe pode fazer — em
+     * qual ambiente dela a conta vai aparecer.</p>
+     */
+    @PostMapping("/{id}/compartilhamentos")
+    public ResponseEntity<Map<String, Object>> compartilhar(
+            @PathVariable UUID id,
+            @Valid @RequestBody PedidoCompartilhar pedido) {
+
+        UUID usuarioId = ContextoRequisicao.usuarioId().orElseThrow();
+        compartilhamentos.compartilhar(ambienteAtivo(), id, pedido.email().trim(), usuarioId);
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(listarCompartilhamentos(id));
+    }
+
+    /**
+     * Um caminho para tres coisas, no idioma de B-D77: o dono cancela um convite
+     * pendente, o dono revoga um acesso ativo, e qualquer um sai da conta que
+     * recebeu.
+     *
+     * <p>A revogacao e <b>logica</b> (B-D93): os lancamentos que ela ja fez ficam
+     * onde estao e continuam somando no saldo do dono, porque aquele dinheiro
+     * saiu da conta de verdade.</p>
+     */
+    @DeleteMapping("/{id}/compartilhamentos/{usuarioId}")
+    public ResponseEntity<Void> removerCompartilhamento(@PathVariable UUID id,
+                                                        @PathVariable UUID usuarioId) {
+        UUID quemPede = ContextoRequisicao.usuarioId().orElseThrow();
+        compartilhamentos.remover(ambienteAtivo(), id, usuarioId, quemPede);
+        return ResponseEntity.noContent().build();
     }
 
     // =========================================================================
@@ -268,6 +349,30 @@ public class ContaControlador {
         List<AmbienteResumo> ambientes,
 
         /**
+         * A conta nasceu neste ambiente (B-D92). Libera renomear, encerrar e
+         * mexer nas formas — que sao DINHEIRO, e por isso valem tambem para quem
+         * entrou no ambiente por convite (B-D76).
+         */
+        boolean origem,
+
+        /**
+         * Sou dono do ambiente onde a conta nasceu. Libera a PORTA — compartilhar
+         * e revogar (B-D91) — e e mais estreito que {@code origem} de proposito:
+         * quem recebeu o ambiente usa a conta a vontade, mas nao a passa adiante.
+         */
+        boolean podeCompartilhar,
+
+        /**
+         * Alguem mais tem esta conta. Explica na tela por que o saldo e maior
+         * que a soma dos lancamentos visiveis — sem a marca, a conta
+         * compartilhada pareceria ter erro de soma.
+         */
+        boolean compartilhada,
+
+        /** Quem abriu a conta, quando ela veio emprestada. Nulo na propria. */
+        String recebidaDe,
+
+        /**
          * As formas que esta conta aceita, e a padrao. Ordenadas pela ordem do
          * enum e nao pela do banco: sem {@code ORDER BY} explicito a lista pode
          * mudar de ordem entre duas chamadas iguais, e a tela ficaria com as
@@ -278,24 +383,24 @@ public class ContaControlador {
         FormaPagamento padraoEntrada
     ) {
         static ContaResposta de(ContaServico.Resumo r, Map<UUID, String> nomes) {
-            return de(r.conta(), r.saldo(), r.ambienteIds(), r.formasDePagamento(), nomes::get);
-        }
-
-        static ContaResposta de(Conta c, SaldoDaConta saldo, List<UUID> ambienteIds,
-                                List<ContaFormaPagamento> formas, Function<UUID, String> nome) {
             return new ContaResposta(
-                c.getId(), c.getNome(), c.getNatureza(), c.getEncerradaEm(),
-                dinheiro(saldo.realizado()),
-                dinheiro(saldo.comPrevistos()),
-                ambienteIds.stream()
-                    .map(id -> new AmbienteResumo(id, nome.apply(id)))
+                r.conta().getId(), r.conta().getNome(), r.conta().getNatureza(),
+                r.conta().getEncerradaEm(),
+                dinheiro(r.saldo().realizado()),
+                dinheiro(r.saldo().comPrevistos()),
+                r.ambienteIds().stream()
+                    .map(id -> new AmbienteResumo(id, nomes.get(id)))
                     .toList(),
-                formas.stream()
+                r.origem(),
+                r.podeCompartilhar(),
+                r.compartilhada(),
+                r.recebidaDe(),
+                r.formasDePagamento().stream()
                     .map(ContaFormaPagamento::getForma)
                     .sorted()
                     .toList(),
-                padrao(formas, ContaFormaPagamento::isPadraoSaida),
-                padrao(formas, ContaFormaPagamento::isPadraoEntrada));
+                padrao(r.formasDePagamento(), ContaFormaPagamento::isPadraoSaida),
+                padrao(r.formasDePagamento(), ContaFormaPagamento::isPadraoEntrada));
         }
 
         private static FormaPagamento padrao(List<ContaFormaPagamento> formas,
@@ -314,4 +419,65 @@ public class ContaControlador {
     }
 
     public record AmbienteResumo(UUID id, String nome) {}
+
+    public record PedidoCompartilhar(
+        @NotBlank(message = "email e obrigatorio")
+        @Email(message = "email malformado")
+        String email
+    ) {}
+
+    /**
+     * Um compartilhamento da conta. <b>Sem campo de ambiente</b>, de proposito:
+     * em qual ambiente dela a conta entrou e organizacao da vida dela, e B-D90 ja
+     * recusou expor isso ao dono quando recusou que ele escolhesse.
+     */
+    public record CompartilhamentoResposta(UUID usuarioId, String nome, String email,
+                                           String situacao) {
+
+        static CompartilhamentoResposta de(CompartilhamentoContaServico.Compartilhamento c) {
+            // Marcador estavel, no espirito de SEM_ACESSO_AO_AMBIENTE (§2c): a
+            // tela decide pelo valor, nunca pelo texto.
+            return new CompartilhamentoResposta(
+                c.usuarioId(), c.nome(), c.email(), c.pendente() ? "PENDENTE" : "ATIVO");
+        }
+    }
+
+    /**
+     * Uma linha do extrato da conta, que pode ser de outro ambiente.
+     *
+     * <p>{@code descricao} e {@code categoria} vem nulos quando {@code meu} e
+     * falso — e nao porque este record os apaga: eles nunca chegaram da funcao do
+     * banco (B-D89 via B-D97). O JSON reflete o que a aplicacao recebeu.</p>
+     */
+    public record LinhaResposta(
+        UUID id,
+        boolean meu,
+        LocalDate data,
+        TipoLancamento tipo,
+        SituacaoLancamento situacao,
+        String valor,
+        FormaPagamento formaPagamento,
+        String descricao,
+        CategoriaResumo categoria,
+        Quem quem,
+        UUID faturaId,
+        Integer parcelaNumero,
+        Integer parcelaTotal
+    ) {
+        static LinhaResposta de(LinhaDoExtrato l) {
+            return new LinhaResposta(
+                l.id(), l.meu(), l.data(), l.tipo(), l.situacao(),
+                l.valor().setScale(2, java.math.RoundingMode.UNNECESSARY).toPlainString(),
+                l.formaPagamento(),
+                l.descricao(),
+                l.categoriaId() == null ? null : new CategoriaResumo(l.categoriaId(), l.categoriaNome()),
+                new Quem(l.quemNome()),
+                l.faturaId(), l.parcelaNumero(), l.parcelaTotal());
+        }
+    }
+
+    public record CategoriaResumo(UUID id, String nome) {}
+
+    /** O autor do lancamento — o "quem" de B-D89, que vem de {@code criado_por}. */
+    public record Quem(String nome) {}
 }

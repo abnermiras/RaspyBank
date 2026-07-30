@@ -37,6 +37,26 @@ export const ambientes = {
   criar: (nome) => pedirComRenovacao('/api/ambientes', json('POST', { nome })),
 }
 
+// ------------------------------------------------------------------ acessos
+/**
+ * Compartilhamento de ambiente (§2c): "é como se eu desse a minha senha para a
+ * pessoa, mas ao invés de dar minha senha dei meu acesso".
+ *
+ * Conceder é imediato, sem aceite (B-D80). Pode responder 404 (e-mail não
+ * cadastrado — e a mensagem diz isso, B-D81), 403 (só o dono mexe na porta) e
+ * 409 (a pessoa já tem acesso).
+ */
+export const acessos = {
+  listar: (ambienteId) => pedirComRenovacao(`/api/ambientes/${ambienteId}/acessos`),
+
+  conceder: (ambienteId, email) =>
+    pedirComRenovacao(`/api/ambientes/${ambienteId}/acessos`, json('POST', { email })),
+
+  /** O dono remove qualquer um; qualquer um remove a si mesmo; o dono não sai. */
+  remover: (ambienteId, usuarioId) =>
+    pedirComRenovacao(`/api/ambientes/${ambienteId}/acessos/${usuarioId}`, json('DELETE')),
+}
+
 // ---------------------------------------------------------------- categorias
 export const categorias = {
   listar: (incluirArquivadas = false) =>
@@ -86,6 +106,63 @@ export const contas = {
         padraoEntrada: padraoEntrada || null,
       }),
     ),
+
+  /**
+   * O extrato da conta, e é ele que ATRAVESSA ambientes (§2d, B-D87).
+   *
+   * Não confundir com `lancamentos.listar({ contaId })`: aquele é o extrato do
+   * AMBIENTE filtrado por conta, e não mostra o lançamento de quem divide a
+   * conta com você. O número que bate com o extrato do banco é este.
+   *
+   * A linha alheia vem sem `descricao` e sem `categoria` (B-D89), e não é a tela
+   * que as esconde — a função do banco não as devolve (B-D97).
+   */
+  extrato: (id, mes) => pedirComRenovacao(`/api/contas/${id}/extrato?mes=${mes}`),
+
+  /** Quem já tem a conta e quem ainda não respondeu, numa lista só. */
+  compartilhamentos: (id) => pedirComRenovacao(`/api/contas/${id}/compartilhamentos`),
+
+  /**
+   * Cria um convite PENDENTE, e não um acesso.
+   *
+   * Diferente do ambiente, que é imediato (B-D80): aqui quem recebe escolhe em
+   * qual ambiente dela a conta vai aparecer (B-D90), e ninguém pode adivinhar
+   * essa escolha. Pode responder 404 (e-mail não cadastrado, B-D81), 403 (só
+   * quem abriu a conta reparte, ou é conta de CARTÃO — que se divide por plástico,
+   * B-D106) e 409 (convite repetido, pessoa que já recebeu, conta encerrada).
+   *
+   * Ter acesso ao seu ambiente NÃO impede (B-D104): ver a conta de dentro do seu
+   * ambiente e ter a conta no ambiente dela são coisas diferentes.
+   */
+  compartilhar: (id, email) =>
+    pedirComRenovacao(`/api/contas/${id}/compartilhamentos`, json('POST', { email })),
+
+  /**
+   * Um caminho para três coisas: cancelar convite, revogar acesso, e sair da
+   * conta que você recebeu.
+   *
+   * Revogar NÃO apaga os lançamentos de quem sai (B-D93) — aquele dinheiro saiu
+   * da conta de verdade, e apagá-lo faria o saldo divergir do extrato do banco.
+   */
+  removerCompartilhamento: (id, usuarioId) =>
+    pedirComRenovacao(`/api/contas/${id}/compartilhamentos/${usuarioId}`, json('DELETE')),
+}
+
+// ------------------------------------------------------------------ convites
+/**
+ * Convites de conta, do lado de quem recebe (§2d).
+ *
+ * Fora de `contas` de propósito: um convite pendente NÃO é uma conta — ela ainda
+ * não aparece para a pessoa, e não aparece por política. Só depois do aceite.
+ */
+export const convites = {
+  listar: () => pedirComRenovacao('/api/convites'),
+
+  /** `ambienteId` é obrigatório: é a escolha que só quem recebe pode fazer. */
+  aceitar: (id, ambienteId) =>
+    pedirComRenovacao(`/api/convites/${id}/aceitar`, json('POST', { ambienteId })),
+
+  recusar: (id) => pedirComRenovacao(`/api/convites/${id}`, json('DELETE')),
 }
 
 // ------------------------------------------------------------- transferências
@@ -124,6 +201,36 @@ export const cartoes = {
     pedirComRenovacao(`/api/cartoes/${id}/emitidos/${emitidoId}/reativar`, json('POST')),
 
   faturas: (id, ano) => pedirComRenovacao(`/api/cartoes/${id}/faturas?ano=${ano}`),
+
+  /**
+   * A unidade do compartilhamento de cartão é o PLÁSTICO (B-D106), nunca o
+   * contrato.
+   *
+   * A V17 dividia a conta do cartão, e o uso mostrou que estava errado: entregava
+   * os dez plásticos quando o que se quer dividir é um adicional. Dividir a conta
+   * de um cartão agora responde **403** apontando este caminho.
+   *
+   * Quem recebe ganha um meio de pagamento dentro da fatura de quem abriu o
+   * contrato — e o extrato daquele plástico. Não o total da fatura (é de quem
+   * paga, B-D107) nem os outros plásticos (B-D110).
+   */
+  plasticos: {
+    compartilhamentos: (cartaoId, emitidoId) =>
+      pedirComRenovacao(`/api/cartoes/${cartaoId}/emitidos/${emitidoId}/compartilhamentos`),
+
+    compartilhar: (cartaoId, emitidoId, email) =>
+      pedirComRenovacao(
+        `/api/cartoes/${cartaoId}/emitidos/${emitidoId}/compartilhamentos`,
+        json('POST', { email }),
+      ),
+
+    /** Tira alguém, ou sai. Sem plástico sobrando, o cartão sai da vista dela. */
+    remover: (cartaoId, emitidoId, usuarioId) =>
+      pedirComRenovacao(
+        `/api/cartoes/${cartaoId}/emitidos/${emitidoId}/compartilhamentos/${usuarioId}`,
+        json('DELETE'),
+      ),
+  },
 }
 
 /**
@@ -145,23 +252,44 @@ export function opcoesDePagamento(conta, formasConhecidas, cartoesDoAmbiente, se
     .map((f) => ({ chave: `forma:${f.valor}`, rotulo: f.nome, forma: f.valor, cartao: null }))
 
   // Cartão de crédito só serve para SAÍDA: ninguém recebe salário no cartão.
+  const plasticos = (c, sufixo) =>
+    (c.emitidos ?? [])
+      .filter((e) => !e.canceladoEm)
+      .map((e) => ({
+        chave: `cartao:${e.id}`,
+        rotulo:
+          `${c.nome} · ${e.tipo === 'FISICO' ? 'físico' : 'virtual'} ····${e.finalDoCartao}`
+          + sufixo,
+        forma: null,
+        cartao: e.id,
+      }))
+
   const cartoes =
     sentido === 'SAIDA'
       ? cartoesDoAmbiente
           .filter((c) => c.banco?.id === conta.id && !c.encerradoEm)
-          .flatMap((c) =>
-            (c.emitidos ?? [])
-              .filter((e) => !e.canceladoEm)
-              .map((e) => ({
-                chave: `cartao:${e.id}`,
-                rotulo: `${c.nome} · ${e.tipo === 'FISICO' ? 'físico' : 'virtual'} ····${e.finalDoCartao}`,
-                forma: null,
-                cartao: e.id,
-              })),
-          )
+          .flatMap((c) => plasticos(c, ''))
       : []
 
-  return [...formas, ...cartoes]
+  /**
+   * O PLÁSTICO dividido com você (B-D106) não fica embaixo de nenhuma conta sua.
+   *
+   * O banco do contrato é uma conta de outra pessoa — você não a enxerga, então o
+   * agrupamento "banco → cartões" de B-D61 não tem onde se apoiar. Ele aparece
+   * para qualquer conta sua, marcado de quem é: o servidor não confere o banco
+   * neste caso, justamente porque a pergunta não tem resposta do seu lado.
+   *
+   * A lista de `emitidos` de um cartão emprestado já vem com SÓ os plásticos que
+   * você recebeu — o recorte é da política, não daqui.
+   */
+  const emprestados =
+    sentido === 'SAIDA'
+      ? cartoesDoAmbiente
+          .filter((c) => c.origem === false && !c.encerradoEm)
+          .flatMap((c) => plasticos(c, ` (de ${c.recebidoDe})`))
+      : []
+
+  return [...formas, ...cartoes, ...emprestados]
 }
 
 // ------------------------------------------------------------------ faturas

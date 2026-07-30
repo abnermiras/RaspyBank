@@ -30,6 +30,22 @@ import java.util.UUID;
  *
  * <p>Vale como aviso permanente: numa tabela de ligacao, conferir um lado
  * parece suficiente e nunca e.</p>
+ *
+ * <h3>O que a V16 acrescentou, e o segundo furo que ela fechou</h3>
+ *
+ * <p>{@code origem} responde onde a conta NASCEU (B-D92). Sem ela, "conta
+ * propria" passava a incluir a conta emprestada: depois do compartilhamento a
+ * conta do dono esta ligada ao ambiente de quem recebeu, que e dono do proprio
+ * ambiente — e {@code app_contas_proprias()} devolvia a conta dele para ela.
+ * O estrago era o mesmo furo de cima pelo avesso: ela podia <b>desvincular a
+ * conta do ambiente de quem a criou</b>, e a conta desaparecia para ele.</p>
+ *
+ * <p>{@code encerradoEm} e a revogacao (B-D93), e ela e logica por dois motivos
+ * somados. O primeiro e estrutural: {@code fk_lancamento_conta} e
+ * {@code ON DELETE RESTRICT}, entao a partir do primeiro lancamento dela o
+ * {@code DELETE} do vinculo e recusado. O segundo e mais importante: aquele
+ * dinheiro saiu da conta de verdade, e apagar o lancamento faria o saldo do
+ * dono divergir do extrato do banco.</p>
  */
 @Entity
 @Table(name = "conta_ambiente")
@@ -44,6 +60,19 @@ public class ContaAmbiente {
     @Column(name = "ambiente_id")
     private UUID ambienteId;
 
+    /**
+     * O ambiente onde a conta nasceu (B-D92). Somente leitura por aqui: a linha
+     * de origem nasce em {@code app_criar_conta}, a porta estreita, e
+     * {@code pol_ca_vincular} recusa qualquer INSERT que a declare verdadeira.
+     * Vinculo criado pela aplicacao e sempre emprestado.
+     */
+    @Column(name = "origem", insertable = false, updatable = false)
+    private boolean origem;
+
+    /** Revogacao logica (B-D93). Escrevivel: e o unico campo que muda aqui. */
+    @Column(name = "encerrado_em")
+    private OffsetDateTime encerradoEm;
+
     @Column(name = "criado_em", insertable = false, updatable = false)
     private OffsetDateTime criadoEm;
 
@@ -55,9 +84,25 @@ public class ContaAmbiente {
         this.ambienteId = ambienteId;
     }
 
-    public UUID getContaId()            { return contaId; }
-    public UUID getAmbienteId()         { return ambienteId; }
-    public OffsetDateTime getCriadoEm() { return criadoEm; }
+    public UUID getContaId()               { return contaId; }
+    public UUID getAmbienteId()            { return ambienteId; }
+    public boolean isOrigem()              { return origem; }
+    public OffsetDateTime getEncerradoEm() { return encerradoEm; }
+    public boolean estaAtivo()             { return encerradoEm == null; }
+    public OffsetDateTime getCriadoEm()    { return criadoEm; }
+
+    /**
+     * Devolve a conta emprestada. Quem sai e ela mesma — o dono revoga por
+     * {@code app_revogar_conta_compartilhada}, porque a linha dela esta num
+     * ambiente que ele nao pode ver (B-D90).
+     */
+    public void encerrar(OffsetDateTime quando) {
+        if (origem) {
+            throw new IllegalStateException(
+                "Vinculo de origem nao se encerra: seria a conta desaparecendo para quem a criou");
+        }
+        this.encerradoEm = quando;
+    }
 
     /** Chave composta. Exigida pelo JPA quando a primaria tem mais de uma coluna. */
     public static class Chave implements Serializable {

@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { lerErro } from '../api/cliente.js'
-import { contas as apiContas } from '../api/recursos.js'
+import {
+  ambientes as apiAmbientes,
+  contas as apiContas,
+  convites as apiConvites,
+} from '../api/recursos.js'
 import Aviso from '../componentes/Aviso.jsx'
+import PainelDeCompartilhamento from '../componentes/PainelDeCompartilhamento.jsx'
+import { useAutenticacao } from '../contexto/Autenticacao.jsx'
 import { useCarregar } from '../ganchos/useCarregar.js'
-import { dinheiro } from '../util/formato.js'
+import { data, dinheiro, mesDe, mesPorExtenso } from '../util/formato.js'
 import {
   carregarFormasDePagamento,
   formasDoSentido,
@@ -43,6 +49,27 @@ import {
 // isso em JavaScript criaria a terceira cópia de uma regra que já vive no banco
 // e no enum, e a divergência apareceria como um seletor oferecendo o que o
 // servidor recusa.
+//
+// COMPARTILHAMENTO DE CONTA (V16, §4k) — o segundo modo, e diferente do
+// ambiente: quem recebe a conta trabalha no ambiente DELA. As categorias são
+// dela, o mapa é dela, e a conta é dos dois. A regra que resume: o saldo
+// atravessa ambientes, a classificação não (B-D85).
+//
+// Três campos novos governam esta tela, e a diferença entre os dois primeiros é
+// a parte que erra fácil:
+//
+//   origem           — a conta nasceu neste ambiente. Libera renomear, encerrar
+//                      e formas, que são DINHEIRO e valem também para quem
+//                      entrou no ambiente por convite (B-D76).
+//   podeCompartilhar — sou dono do ambiente onde ela nasceu. Libera a PORTA
+//                      (B-D91). Mais estreito de propósito: quem recebeu o
+//                      ambiente usa a conta, mas não a passa adiante.
+//   compartilhada    — alguém mais tem esta conta. Sem esta marca, o saldo
+//                      maior que a soma dos lançamentos visíveis pareceria erro.
+//
+// O SALDO já vem somando os dois lados (B-D87). Por isso o extrato da conta tem
+// endpoint próprio: o extrato do mês é o do ambiente e não atravessa, então numa
+// conta compartilhada ele nunca fecharia com o saldo mostrado aqui.
 // =============================================================================
 
 const NATUREZAS = [
@@ -51,6 +78,7 @@ const NATUREZAS = [
 ]
 
 export default function Contas() {
+  const { perfil } = useAutenticacao()
   const [incluirEncerradas, setIncluirEncerradas] = useState(false)
   const buscar = useCallback(
     () => apiContas.listar(incluirEncerradas),
@@ -61,6 +89,8 @@ export default function Contas() {
   const [aviso, setAviso] = useState(null)
   const [editando, setEditando] = useState(null)
   const [editandoFormas, setEditandoFormas] = useState(null)
+  const [compartilhando, setCompartilhando] = useState(null)
+  const [vendoExtrato, setVendoExtrato] = useState(null)
   const [ocupado, setOcupado] = useState(false)
 
   // O vocabulário de formas vem do servidor. Carregado uma vez por tela; o
@@ -105,6 +135,13 @@ export default function Contas() {
           Mostrar encerradas
         </label>
       </header>
+
+      {/*
+        Os convites vêm ANTES do formulário, e no topo da tela de contas de
+        propósito: um convite que ninguém vê é um convite que não existe, e é
+        aqui que a conta vai aparecer quando ela aceitar.
+      */}
+      <ConvitesPendentes aoAceitar={recarregar} />
 
       <FormularioDeConta
         ocupado={ocupado}
@@ -163,8 +200,40 @@ export default function Contas() {
                       : apiContas.encerrar(conta.id),
                   )
                 }
+                aoCompartilhar={() =>
+                  setCompartilhando(compartilhando === conta.id ? null : conta.id)
+                }
+                aoVerExtrato={() =>
+                  setVendoExtrato(vendoExtrato === conta.id ? null : conta.id)
+                }
+                aoDevolver={() => {
+                  if (
+                    window.confirm(
+                      `Devolver "${conta.nome}" para ${conta.recebidaDe}?`
+                        + ' Os lançamentos que você já fez nela continuam no seu histórico'
+                        + ' e no saldo da conta — o dinheiro passou por lá de verdade.',
+                    )
+                  ) {
+                    // Sair é o MESMO caminho de revogar, com o próprio id: o
+                    // dono remove qualquer um, qualquer um remove a si mesmo.
+                    executar(
+                      () => apiContas.removerCompartilhamento(conta.id, perfil.usuarioId),
+                      `Você devolveu "${conta.nome}".`,
+                    )
+                  }
+                }}
               />
             )}
+
+            {compartilhando === conta.id && (
+              <PainelDeCompartilhamento
+                recurso={conta}
+                api={apiContas}
+                aoMudar={recarregar}
+              />
+            )}
+
+            {vendoExtrato === conta.id && <ExtratoDaConta conta={conta} />}
 
             {editandoFormas === conta.id && (
               <EditorDeFormas
@@ -191,10 +260,18 @@ export default function Contas() {
 
 // ----------------------------------------------------------------------------
 
-function LinhaDeConta({ conta, ocupado, formasConhecidas, aoEditar, aoEditarFormas, aoEncerrar }) {
+function LinhaDeConta({
+  conta, ocupado, formasConhecidas,
+  aoEditar, aoEditarFormas, aoEncerrar, aoCompartilhar, aoVerExtrato, aoDevolver,
+}) {
   const temPrevisto = conta.saldo !== conta.saldoComPrevistos
-  const compartilhada = (conta.ambientes?.length ?? 0) > 1
   const formas = conta.formasPagamento ?? []
+
+  // Antes da V16, "compartilhada" era ter mais de um ambiente na lista — e a
+  // lista só mostra os ambientes de quem está olhando, então a conta dividida
+  // com outra pessoa aparecia como não compartilhada. Agora o servidor responde.
+  const emMaisDeUmAmbienteMeu = (conta.ambientes?.length ?? 0) > 1
+  const recebida = Boolean(conta.recebidaDe)
 
   return (
     <div className="linha-recurso linha-conta">
@@ -204,12 +281,38 @@ function LinhaDeConta({ conta, ocupado, formasConhecidas, aoEditar, aoEditarForm
           {conta.natureza === 'ATIVO' ? 'Ativo' : 'Passivo'}
         </span>
         {conta.encerradaEm && <span className="etiqueta etiqueta-fraca">encerrada</span>}
-        {compartilhada && (
+
+        {recebida && (
           <span
             className="etiqueta etiqueta-fraca"
-            title={`Visível em: ${conta.ambientes.map((a) => a.nome).join(', ')}`}
+            title={
+              `${conta.recebidaDe} dividiu esta conta com você. Lance nela à vontade;`
+              + ' os seus lançamentos ficam no SEU mapa, com as SUAS categorias,'
+              + ' e o saldo é o mesmo para os dois.'
+            }
           >
-            compartilhada
+            de {conta.recebidaDe}
+          </span>
+        )}
+
+        {conta.compartilhada && (
+          <span
+            className="etiqueta etiqueta-fraca"
+            title={
+              'Outra pessoa também lança nesta conta. O saldo acima já soma os dois'
+              + ' lados — use o Extrato para ver os movimentos dela.'
+            }
+          >
+            dividida
+          </span>
+        )}
+
+        {emMaisDeUmAmbienteMeu && (
+          <span
+            className="etiqueta etiqueta-fraca"
+            title={`Aparece nos seus ambientes: ${conta.ambientes.map((a) => a.nome).join(', ')}`}
+          >
+            em {conta.ambientes.length} ambientes
           </span>
         )}
         <span className="formas-da-conta">
@@ -255,21 +358,240 @@ function LinhaDeConta({ conta, ocupado, formasConhecidas, aoEditar, aoEditarForm
         )}
       </div>
 
+      {/*
+        Os botões seguem os dois campos, e não um só. `origem` libera o que é
+        dinheiro (renomear, formas, encerrar) — inclusive para quem entrou no
+        ambiente por convite, que é o que B-D76 manda. `podeCompartilhar` libera
+        a porta, e é mais estreito. Esconder em vez de mostrar-e-recusar: um
+        botão que sempre responde 403 é um botão que mente.
+      */}
       <div className="acoes-linha">
-        {!conta.encerradaEm && (
+        <button type="button" className="botao-texto" onClick={aoVerExtrato} disabled={ocupado}>
+          Extrato
+        </button>
+
+        {conta.origem && !conta.encerradaEm && (
           <button type="button" className="botao-texto" onClick={aoEditar} disabled={ocupado}>
             Renomear
           </button>
         )}
-        {!conta.encerradaEm && (
+        {conta.origem && !conta.encerradaEm && (
           <button type="button" className="botao-texto" onClick={aoEditarFormas} disabled={ocupado}>
             Formas
           </button>
         )}
-        <button type="button" className="botao-texto" onClick={aoEncerrar} disabled={ocupado}>
-          {conta.encerradaEm ? 'Reabrir' : 'Encerrar'}
-        </button>
+        {conta.podeCompartilhar && !conta.encerradaEm && (
+          <button type="button" className="botao-texto" onClick={aoCompartilhar} disabled={ocupado}>
+            Dividir
+          </button>
+        )}
+        {conta.origem && (
+          <button type="button" className="botao-texto" onClick={aoEncerrar} disabled={ocupado}>
+            {conta.encerradaEm ? 'Reabrir' : 'Encerrar'}
+          </button>
+        )}
+        {recebida && (
+          <button type="button" className="botao-texto" onClick={aoDevolver} disabled={ocupado}>
+            Devolver
+          </button>
+        )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Os convites de conta esperando você (B-D90).
+ *
+ * O AMBIENTE É UM CAMPO OBRIGATÓRIO, e é o ponto do aceite. Cair no ambiente
+ * ativo mandaria a conta doméstica para o PJ sem aviso, e os gastos iriam para o
+ * mapa errado até alguém notar — e notar é difícil, porque nada avisa.
+ *
+ * Só ambientes de que a pessoa é DONA entram no seletor: aceitar dentro de um
+ * ambiente que ela recebeu emprestado espalharia a conta para o dono daquele
+ * ambiente, que não participou de nada disto.
+ */
+function ConvitesPendentes({ aoAceitar }) {
+  const buscar = useCallback(() => apiConvites.listar(), [])
+  const { dados, recarregar } = useCarregar(buscar)
+
+  const [meusAmbientes, setMeusAmbientes] = useState([])
+  const [aviso, setAviso] = useState(null)
+  const [ocupado, setOcupado] = useState(false)
+  const [escolhas, setEscolhas] = useState({})
+
+  const lista = dados?.convites ?? []
+
+  useEffect(() => {
+    if (lista.length === 0) return
+    apiAmbientes.listar().then((r) => {
+      if (r.ok) setMeusAmbientes((r.corpo.ambientes ?? []).filter((a) => a.dono))
+    })
+  }, [lista.length])
+
+  if (lista.length === 0) return null
+
+  async function executar(acao, mensagemDeSucesso) {
+    setOcupado(true)
+    setAviso(null)
+    try {
+      const resposta = await acao()
+      if (!resposta.ok) {
+        setAviso({ texto: lerErro(resposta).mensagem, sucesso: false })
+        return
+      }
+      setAviso({ texto: mensagemDeSucesso, sucesso: true })
+      await recarregar()
+      await aoAceitar()
+    } catch {
+      setAviso({ texto: 'Servidor indisponível.', sucesso: false })
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  return (
+    <div className="formulario-bloco">
+      <h3>Contas que dividiram com você</h3>
+
+      <p className="dica">
+        Escolha em qual dos seus ambientes cada conta vai aparecer — é uma escolha
+        que só você pode fazer, e ela decide em qual mapa de gastos os seus
+        lançamentos vão entrar. O saldo é o mesmo para os dois; a{' '}
+        <strong>classificação</strong> é sua.
+      </p>
+
+      <Aviso aviso={aviso} />
+
+      <ul className="lista-ambientes">
+        {lista.map((convite) => {
+          const escolhido = escolhas[convite.id] ?? meusAmbientes[0]?.id ?? ''
+
+          return (
+            <li key={convite.id}>
+              <span className="nome-recurso">{convite.conta.nome}</span>
+              <span className="texto-fraco"> de {convite.de.nome}</span>
+
+              <label>
+                Aparecer em
+                <select
+                  value={escolhido}
+                  onChange={(e) =>
+                    setEscolhas({ ...escolhas, [convite.id]: e.target.value })
+                  }
+                >
+                  {meusAmbientes.map((a) => (
+                    <option key={a.id} value={a.id}>{a.nome}</option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="button" className="botao-principal botao-pequeno"
+                disabled={ocupado || !escolhido}
+                onClick={() =>
+                  executar(
+                    () => apiConvites.aceitar(convite.id, escolhido),
+                    `"${convite.conta.nome}" agora aparece no ambiente escolhido.`,
+                  )
+                }
+              >
+                Aceitar
+              </button>
+
+              <button
+                type="button" className="botao-texto" disabled={ocupado}
+                onClick={() =>
+                  executar(
+                    () => apiConvites.recusar(convite.id),
+                    `Convite de ${convite.de.nome} recusado.`,
+                  )
+                }
+              >
+                Recusar
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+/**
+ * O extrato da conta, e é ele que ATRAVESSA ambientes (B-D87).
+ *
+ * O extrato do mês (T-08) é o do ambiente e não atravessa — numa conta dividida
+ * ele nunca fecharia com o saldo mostrado aqui. Esta é a lista que confere
+ * contra o extrato do banco.
+ */
+function ExtratoDaConta({ conta }) {
+  const [mes, setMes] = useState(mesDe(new Date()))
+  const buscar = useCallback(() => apiContas.extrato(conta.id, mes), [conta.id, mes])
+  const { dados, carregando, erro } = useCarregar(buscar)
+
+  const linhas = dados?.lancamentos ?? []
+
+  return (
+    <div className="formulario-bloco">
+      <h3>Extrato de “{conta.nome}”</h3>
+
+      <div className="campos-lado-a-lado">
+        <label>
+          Mês
+          <input type="month" value={mes} onChange={(e) => setMes(e.target.value)} />
+        </label>
+      </div>
+
+      <p className="dica">
+        {mesPorExtenso(mes)}. Esta lista mostra <strong>todos</strong> os
+        movimentos da conta, inclusive os de quem a divide com você — é ela que
+        bate com o extrato do banco.
+      </p>
+
+      {erro && <p className="aviso" role="alert">{erro}</p>}
+      {carregando && <p className="carregando">Carregando…</p>}
+
+      {!carregando && linhas.length === 0 && (
+        <p className="texto-vazio">Nenhum movimento neste mês.</p>
+      )}
+
+      <ul className="lista-ambientes">
+        {linhas.map((l) => (
+          <li key={l.id} className={l.meu ? undefined : 'arquivada'}>
+            <span className="texto-fraco">{data(l.data)}</span>
+
+            {/*
+              A linha alheia não tem descrição nem categoria para mostrar, e não
+              é esta tela que as esconde: elas não vêm do servidor (B-D97). O que
+              se põe no lugar é o nome de quem fez — que é o que basta para o
+              valor deixar de ser um mistério.
+            */}
+            <span className="nome-recurso">
+              {l.meu ? (l.descricao || l.categoria?.nome || '—') : `movimento de ${l.quem.nome}`}
+            </span>
+
+            {l.meu && l.categoria && (
+              <span className="etiqueta etiqueta-fraca">{l.categoria.nome}</span>
+            )}
+            {l.situacao === 'PREVISTO' && (
+              <span className="etiqueta etiqueta-fraca">previsto</span>
+            )}
+            {l.parcelaTotal > 1 && (
+              <span
+                className="etiqueta etiqueta-fraca"
+                title="Compra parcelada: as próximas parcelas já estão comprometidas nas faturas seguintes"
+              >
+                {l.parcelaNumero}/{l.parcelaTotal}
+              </span>
+            )}
+
+            <span className={l.tipo === 'ENTRADA' ? 'etiqueta-entrada' : undefined}>
+              {l.tipo === 'ENTRADA' ? '+' : '−'} {dinheiro(l.valor)}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

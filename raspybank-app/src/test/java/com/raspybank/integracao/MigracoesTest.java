@@ -65,14 +65,81 @@ class MigracoesTest extends IntegracaoTest {
         // de entrar mesmo quando o autor nao tem identidade valida — auditoria
         // recusada pela politica seria o pior resultado possivel.
         "fn_auditar",
-        "fn_publicar_evento_lancamento");
+        "fn_publicar_evento_lancamento",
+        // Compartilhamento (V15). Tres irmas de app_ambientes_do_usuario, com
+        // a mesma razao de DEFINER (politica consultando tabela com politica),
+        // e a funcao estreita do convite: resolver e-mail em id e o impasse de
+        // B-D19 na forma pura — a linha do convidado so se tornaria visivel
+        // pelo vinculo que a operacao vai criar.
+        "app_ambientes_proprios",
+        "app_contas_proprias",
+        "app_membros_dos_meus_ambientes",
+        "app_usuario_por_email",
+        // Compartilhamento de CONTA (V16). Duas naturezas diferentes na mesma
+        // migracao, e vale distingui-las:
+        //
+        // app_aceitar_convite_de_conta e o impasse classico — ela insere um
+        // vinculo entre uma conta que NAO e dela e um ambiente que e, e o
+        // WITH CHECK exige conta propria dos dois lados justamente para impedir
+        // captura de conta alheia. O que separa aceite de captura e o convite,
+        // e por isso a funcao le o convite em vez de receber a conta.
+        //
+        // As outras quatro sao a QUARTA excecao de B-D19 e as primeiras em
+        // consulta de LEITURA (B-D96). O impasse e de outra forma e igualmente
+        // inevitavel: por construcao uma pessoa nao pode ver os lancamentos da
+        // outra pela politica, e mesmo assim precisa soma-los, senao os dois
+        // veem saldos diferentes na mesma conta. Cada uma tem PORTEIRO na
+        // primeira linha — sem ele, DEFINER significaria "leia qualquer conta
+        // do sistema, basta ter o UUID".
+        "app_aceitar_convite_de_conta",
+        "app_compartilhamentos_da_conta",
+        // A terceira irma de app_contas_do_usuario, e ela existe porque os dois
+        // modos de compartilhar respondem DIFERENTE para "quem renomeia e
+        // encerra esta conta?": no ambiente e dinheiro (B-D76), na conta nao
+        // (B-D95). A regra que satisfaz as duas e "estar no ambiente onde a
+        // conta nasceu".
+        "app_contas_nao_emprestadas",
+        // Antes do aceite a conta e invisivel para quem foi convidado — a
+        // politica pede o vinculo que o aceite vai criar. Sem esta funcao o
+        // convite chegaria como "alguem quer dividir algo com voce".
+        "app_convites_de_conta_pendentes",
+        "app_dono_da_conta",
+        "app_extrato_da_conta",
+        // Revogar e a irma do aceite, e pelo motivo mais curioso da lista: o
+        // dono precisa encerrar uma linha que ele nao pode VER — pol_ca_leitura
+        // mostra a cada um so o proprio lado do vinculo, e isso e deliberado
+        // (B-D90). A politica autoriza a escrita; nenhum UPDATE comum alcanca a
+        // linha.
+        "app_revogar_conta_compartilhada",
+        "app_saldo_da_conta",
+        // Cartao compartilhado (V17). As duas ultimas da quarta excecao, e o
+        // sintoma de nao te-las e pior que um saldo divergente: a fatura
+        // pareceria menor do que e, e o pagamento sairia curto — alguem
+        // descobriria com juros.
+        "app_extrato_da_fatura",
+        "app_total_da_fatura",
+        // O PLASTICO como unidade (V19). O compartilhamento de cartao passou a
+        // ser por emitido, e nao pela conta do contrato (B-D106): dividir um
+        // cartao entregava os dez plasticos.
+        //
+        // As duas primeiras sao as irmas de sempre — politica consultando tabela
+        // com politica. O aceite e a revogacao repetem os impasses do §4k, com um
+        // passo a mais: cartao_emitido_ambiente NAO TEM politica de escrita
+        // nenhuma, entao nao existe caminho por fora das funcoes.
+        "app_aceitar_convite_de_plastico",
+        "app_compartilhamentos_do_plastico",
+        "app_emitidos_liberados",
+        "app_revogar_plastico_compartilhado",
+        "app_total_do_plastico");
 
     private static final List<String> TABELAS_COM_RLS = List.of(
         // Fundacao (V3)
         "usuario", "ambiente", "usuario_ambiente", "registro_auditoria", "outbox",
         // Dominio (V10). A regra da casa: tabela nova nasce com RLS ligado.
         // Tabela de dominio sem politica e tabela que qualquer usuario le inteira.
-        "categoria", "subcategoria", "conta", "conta_ambiente", "lancamento");
+        "categoria", "subcategoria", "conta", "conta_ambiente", "lancamento",
+        // Compartilhamento de conta (V16) e de plastico (V19)
+        "conta_convite", "cartao_emitido_ambiente");
 
     private Connection comoProprietario() throws SQLException {
         return DriverManager.getConnection(
@@ -118,7 +185,7 @@ class MigracoesTest extends IntegracaoTest {
     }
 
     @Test
-    @DisplayName("RLS ligado nas dez tabelas: cinco da fundacao, cinco do dominio")
+    @DisplayName("RLS ligado nas onze tabelas: cinco da fundacao, cinco do dominio, o convite")
     void rlsLigadoNasTabelas() throws SQLException {
         try (Connection c = comoProprietario();
              PreparedStatement ps = c.prepareStatement(

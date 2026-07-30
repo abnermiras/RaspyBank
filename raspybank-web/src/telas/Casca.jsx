@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { AVISO_DE_SESSAO } from '../api/cliente.js'
 import { useAutenticacao } from '../contexto/Autenticacao.jsx'
 
 // =============================================================================
@@ -25,6 +27,18 @@ const ITENS = [
 export default function Casca() {
   const { perfil, sair, trocarAmbiente } = useAutenticacao()
   const navegar = useNavigate()
+
+  /**
+   * O recado que atravessou um recarregar — hoje, só um existe: o acesso ao
+   * ambiente em que a pessoa estava foi revogado (B-D83) e ela voltou para um
+   * ambiente dela. Lido uma vez e apagado: recarregar de novo não deve
+   * repetir um aviso que já foi dado.
+   */
+  const [avisoDeSessao, setAvisoDeSessao] = useState(() => {
+    const texto = sessionStorage.getItem(AVISO_DE_SESSAO)
+    sessionStorage.removeItem(AVISO_DE_SESSAO)
+    return texto
+  })
 
   const ambientes = perfil?.ambientes ?? []
   const atual = perfil?.ambienteAtual ?? ''
@@ -65,7 +79,12 @@ export default function Casca() {
             onChange={(e) => trocarEIrParaOMapa(e.target.value)}
           >
             {ambientes.map((ambiente) => (
-              <option key={ambiente.id} value={ambiente.id}>{ambiente.nome}</option>
+              <option key={ambiente.id} value={ambiente.id}>
+                {/* O sufixo diferencia o emprestado do próprio: os dois estão
+                    na mesma lista de propósito (B-D74), e sem a marca a pessoa
+                    lançaria "no lugar errado" sem nenhum indício. */}
+                {ambiente.dono ? ambiente.nome : `${ambiente.nome} · compartilhado`}
+              </option>
             ))}
           </select>
         </div>
@@ -75,6 +94,18 @@ export default function Casca() {
           <button type="button" className="botao-texto" onClick={sair}>Sair</button>
         </div>
       </header>
+
+      {avisoDeSessao && (
+        <p className="aviso" role="alert">
+          {avisoDeSessao}
+          <button
+            type="button" className="botao-texto"
+            onClick={() => setAvisoDeSessao(null)}
+          >
+            Entendi
+          </button>
+        </p>
+      )}
 
       <div className="corpo">
         <nav className="menu">

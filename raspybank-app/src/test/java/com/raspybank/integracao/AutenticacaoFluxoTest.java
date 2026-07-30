@@ -20,6 +20,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * O circuito completo, pela porta da frente: HTTP -> filtro JWT -> contexto ->
@@ -38,6 +39,7 @@ class AutenticacaoFluxoTest extends IntegracaoTest {
 
     private static final String SENHA = "senha-com-mais-de-10";
     private static String email;
+    private static String telegram;
     private static String usuarioId;
     private static String ambienteId;
     private static String tokenAcesso;
@@ -51,15 +53,63 @@ class AutenticacaoFluxoTest extends IntegracaoTest {
     @DisplayName("Cadastro cria usuario E primeiro ambiente, atomicamente (A12)")
     void cadastro() {
         email = "fluxo-" + UUID.randomUUID().toString().substring(0, 8) + "@teste.local";
+        telegram = "@fluxo_" + UUID.randomUUID().toString().substring(0, 8);
 
         ResponseEntity<Map> resposta = postJson("/api/auth/cadastro",
-            Map.of("nome", "Fluxo Completo Teste", "email", email, "senha", SENHA));
+            Map.of("nome", "Fluxo Completo Teste", "email", email, "senha", SENHA,
+                   "telegramId", telegram));
 
         assertEquals(HttpStatus.CREATED, resposta.getStatusCode());
         usuarioId  = String.valueOf(resposta.getBody().get("usuarioId"));
         ambienteId = String.valueOf(resposta.getBody().get("ambienteId"));
         assertNotNull(UUID.fromString(usuarioId));
         assertNotNull(UUID.fromString(ambienteId));
+    }
+
+    @Test
+    @Order(1)
+    @DisplayName("Telegram e OPCIONAL, e vazio nao ocupa o indice unico (V18)")
+    void telegramEhOpcional() {
+        // Dois cadastros sem telegram — um com o campo ausente, outro com string
+        // vazia. Os dois precisam passar: `ux_usuario_telegram` e um indice
+        // PARCIAL (so nao-nulos), e a funcao converte vazio em nulo justamente
+        // para que o segundo cadastro nao falhe por duplicidade num campo que
+        // ninguem preencheu.
+        assertEquals(HttpStatus.CREATED, postJson("/api/auth/cadastro", Map.of(
+            "nome", "Sem Telegram A",
+            "email", "semtg-a-" + UUID.randomUUID().toString().substring(0, 8) + "@teste.local",
+            "senha", SENHA)).getStatusCode());
+
+        assertEquals(HttpStatus.CREATED, postJson("/api/auth/cadastro", Map.of(
+            "nome", "Sem Telegram B",
+            "email", "semtg-b-" + UUID.randomUUID().toString().substring(0, 8) + "@teste.local",
+            "senha", SENHA,
+            "telegramId", "")).getStatusCode());
+    }
+
+    @Test
+    @Order(1)
+    @DisplayName("O mesmo Telegram em duas contas responde 409 com frase")
+    void telegramDuplicadoRecusa() {
+        String repetido = "@repetido_" + UUID.randomUUID().toString().substring(0, 8);
+
+        assertEquals(HttpStatus.CREATED, postJson("/api/auth/cadastro", Map.of(
+            "nome", "Primeiro",
+            "email", "tg1-" + UUID.randomUUID().toString().substring(0, 8) + "@teste.local",
+            "senha", SENHA,
+            "telegramId", repetido)).getStatusCode());
+
+        // Duas contas apontando para o mesmo Telegram fariam o bot nao saber para
+        // quem lancar — e o erro tem de ser frase, nao violacao de indice crua.
+        ResponseEntity<Map> segundo = postJson("/api/auth/cadastro", Map.of(
+            "nome", "Segundo",
+            "email", "tg2-" + UUID.randomUUID().toString().substring(0, 8) + "@teste.local",
+            "senha", SENHA,
+            "telegramId", repetido));
+
+        assertEquals(HttpStatus.CONFLICT, segundo.getStatusCode());
+        assertTrue(String.valueOf(segundo.getBody().get("erro")).toLowerCase().contains("telegram"),
+            "A frase nao explica o que houve: " + segundo.getBody().get("erro"));
     }
 
     @Test
@@ -115,6 +165,11 @@ class AutenticacaoFluxoTest extends IntegracaoTest {
         assertEquals(1, ambientes.size(),
             "Recem-cadastrado deveria enxergar exatamente um ambiente — o dele");
         assertEquals(ambienteId, String.valueOf(ambientes.get(0).get("id")));
+
+        // O que foi preenchido no cadastro volta na leitura. Sem isto, quem
+        // digitou o Telegram nao tem como conferir o que ficou gravado — e nao
+        // existe caminho de edicao ainda.
+        assertEquals(telegram, resposta.getBody().get("telegramId"));
     }
 
     @Test

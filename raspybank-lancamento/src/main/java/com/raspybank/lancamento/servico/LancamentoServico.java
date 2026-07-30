@@ -345,7 +345,25 @@ public class LancamentoServico {
 
         exigirContaNoAmbiente(ambienteId, cartao.getContaId());
 
-        if (!cartao.getContaBancoId().equals(dados.contaId())) {
+        // A conferencia do banco vale para o cartao que nasceu aqui, e SO para
+        // ele (§4l). No cartao dividido, o banco do contrato e uma conta de outra
+        // pessoa: quem recebeu o cartao nao a enxerga, e a pergunta "de qual
+        // banco?" nao tem resposta possivel do lado dela.
+        //
+        // Nao e a checagem afrouxando — e ela deixando de existir num contexto em
+        // que nao significa nada. No caminho normal ela continua inteira, e
+        // continua impedindo que escolher Nubank e um cartao do C6 grave a compra
+        // no C6 em silencio. A conta do proprio cartao tambem passa: e o modelo
+        // cru, e e o que a tela de quem recebeu tem para enviar.
+        boolean nasceuAqui = vinculos
+            .findById(new ContaAmbiente.Chave(cartao.getContaId(), ambienteId))
+            .map(ContaAmbiente::isOrigem)
+            .orElse(false);
+
+        boolean contaCoerente = cartao.getContaBancoId().equals(dados.contaId())
+            || cartao.getContaId().equals(dados.contaId());
+
+        if (nasceuAqui && !contaCoerente) {
             throw new OperacaoNaoPermitida(
                 "O cartao '" + cartao.getNome() + "' nao pertence a conta escolhida."
                     + " Escolha o banco a que ele pertence.");

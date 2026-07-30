@@ -285,6 +285,181 @@ O sintoma é cruel: `findById` devolve vazio para um usuário que existe, e a te
 
 Fica registrado como dívida pequena: o teste deveria ler o documento. Enquanto não lê, quem esquecer o documento passa no build.
 
+# 4j. Compartilhamento de ambiente (29/07/2026) — desenho e, no mesmo dia, a V15
+
+Escritas na varredura que precedeu a V15, no mesmo formato que precedeu a V10, a V11 e a V12. **Implementado na V15, no mesmo dia** — o desenho valeu inteiro; o que a implementação acrescentou está no fim da seção.
+
+Descrição dele, e é a frase que orienta tudo: *"é como se eu desse a minha senha para a pessoa, mas ao invés de dar minha senha dei meu acesso"*.
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D74 | **Compartilhar ambiente é UMA LINHA em `usuario_ambiente`.** Não existe mecanismo novo de visibilidade | O tenant do RLS sempre foi o **usuário**, e a visibilidade sempre foi por vínculo (A08/R7). Inserida a linha, o ambiente aparece na lista dela e todas as políticas já respondem certo — contas, categorias, cartões, mapa. Não é sorte: é a fundação, desenhada assim na Fase 2 para exatamente este caso. **Compartilhar conta e compartilhar cartão não existem como mecanismos separados**: quem está no ambiente vê o que está nele |
+| B-D75 | **`usuario_ambiente` ganha `dono`, um booleano — e NÃO um sistema de papéis** | Ele foi explícito: *"por hora não vai ter perfil nem nada"*. A coluna responde uma pergunta só — **quem abriu a porta** — e divide o mundo em dois: mexer no **dinheiro** (todos) e mexer na **porta** (só o dono). Sem ela não dá para impedir que a convidada remova o dono do próprio ambiente, nem para mostrar "ambiente de Abner" na lista dela: hoje ninguém sabe quem criou o quê |
+| B-D76 | **Porta = convidar, remover acesso, renomear e apagar. Dinheiro = todo o resto** | Renomear entra na porta porque o nome é **um só** e aparece na lista de todos, inclusive na do dono. O resto — lançar, editar e excluir lançamento de qualquer um, criar e encerrar conta, criar e encerrar cartão, fechar e pagar fatura, transferir — é controle total, como ele pediu |
+| B-D77 | **O dono remove qualquer um; qualquer um remove a si mesmo; o dono não sai** | Se só o dono removesse, a convidada ficaria presa num ambiente que não pediu. E o dono sair deixaria um ambiente órfão, sem ninguém que possa convidar ou apagar — o caminho para se livrar dele é apagá-lo, que é a conversa adiada |
+| B-D78 | **B-D18 APERTA: vincular e desvincular conta de ambiente exige ser DONO dos dois lados** | B-D18 dizia "só se vincula conta que já se enxerga", e o raciocínio estava certo para a época: enxergar significava **ser dona**. Com compartilhamento, passa a significar "minha **ou emprestada**" — e a convidada poderia levar a conta conjunta para o ambiente pessoal dela e lançar de lá, invisível ao dono. Desvincular tem o mesmo peso: tirar a conta do único ambiente em que ela aparece a esconderia de todo mundo, dono incluído |
+| B-D79 | **Isto FECHA o I-23**, e não o adia | O I-23 — saldo parcial em conta compartilhada — estava aberto desde 26/07 com a nota "só dói quando existir convite". O convite chegou e ele não vai doer: com B-D78, todo lançamento daquela conta nasce no mesmo ambiente, e as duas pessoas veem o mesmo saldo, a mesma fatura e o mesmo mapa. **Não foi contornado — o desenho escolhido não cria a divergência** |
+| B-D80 | **Acesso concedido é imediato, sem aceite** | Coerente com "dei meu acesso": o ambiente aparece na lista dela na hora, e ela sai com um clique se não quiser. Um fluxo de aceite traria três estados, mais uma tela, e a dúvida de "ela viu ou ignorou?". Custo assumido: dá para empurrar um ambiente para a lista de alguém |
+| B-D81 | **E-mail não cadastrado responde 404 dizendo isso** | É um oráculo de enumeração: quem tem conta descobre, um por vez, se um e-mail qualquer está cadastrado. **Aceito conscientemente**, e a alternativa era pior no caso real — responder "ok" para um e-mail digitado errado esconderia o erro mais comum de todos, e a pessoa descobriria dias depois que o convite nunca chegou. Se um dia isto sair da rede de casa, a decisão se revisita |
+| B-D82 | **A auditoria não muda em nada** | `fn_auditar` lê `raspybank.usuario_id` da **sessão**, não o dono do ambiente. Toda ação da convidada já nasce carimbada com o nome dela — que é exatamente o que ele pediu (*"no log só marcar que a ação feita no ambiente foi feita pelo usuário que ganhou o acesso"*). Zero código |
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D83 | **Toda requisição confere se o `ambienteId` do token ainda pertence a quem o apresenta.** Se não pertence: **403 com frase**, não silêncio | A convidada pode estar trabalhando dentro do ambiente quando o acesso é revogado, e o JWT dela vale mais quinze minutos. A RLS já corta os dados — nada indevido aparece —, mas a tela ficaria **vazia e sem explicação**: contas zeradas, mapa em branco, nenhum erro. A conferência é uma busca por chave primária em `usuario_ambiente`, e `usuarioPertence` já existe. **É mais geral que o compartilhamento**: qualquer motivo para o vínculo sumir — revogação hoje, ambiente apagado amanhã — passa a ter a mesma resposta clara, sem código novo por caso |
+| B-D84 | **Revogar acesso NÃO derruba as sessões da pessoa** | A proposta inicial dele era logoff geral em todos os dispositivos. Duas coisas a demoveram. **A primeira**: encerrar sessão revoga a **renovação**, não o **acesso** — achado já registrado neste projeto —, então o JWT continuaria vivo e a janela de tela vazia continuaria existindo. Não resolvia o problema que motivou a ideia. **A segunda**: derrubaria também a sessão dela no ambiente **dela**, que não tem relação nenhuma com quem revogou — ela seria deslogada no meio do próprio mercado por causa de uma arrumação alheia. Com B-D83 o efeito desejado acontece na hora, e sem atingir o que não é do assunto |
+
+## O detalhe que só aparece no uso
+
+Este era o ponto: a convidada trabalhando dentro do ambiente na hora da revogação. Fechado por B-D83 — e vale registrar que a primeira ideia, o logoff geral, **não teria fechado**, porque logout não mata o token de acesso.
+
+## O que a V15 vai precisar carregar
+
+- `usuario_ambiente.dono`, com retroalimentação: hoje cada ambiente tem exatamente um membro, e ele é o dono;
+- índice parcial garantindo **exatamente um dono** por ambiente, no formato de `ux_cfp_padrao_saida`;
+- `app_ambientes_proprios()` e `app_contas_proprias()`, irmãs das que já existem, filtrando por `dono`;
+- o `WITH CHECK` de `pol_ca_ambiente` apertado (B-D78);
+- uma função estreita para resolver e-mail → id, porque `pol_usuario_proprio` só deixa cada um enxergar a si mesmo.
+
+## O que a implementação acrescentou (V15, 29/07/2026 — a a f, para revisão)
+
+A lista acima valeu inteira. Estas seis vieram por necessidade descoberta no código, no mesmo espírito das decisões numeradas — **sem número de B-D de propósito: os números são das conversas, e estas ainda não passaram por uma**.
+
+**a) O convidado tem nome — política, e não função.** A lista de acessos mostra nome e e-mail de cada membro, e `pol_usuario_proprio` ("cada um enxerga a si mesmo") esconderia os co-membros. Havia dois caminhos: uma função `SECURITY DEFINER` de leitura, ou dizer a regra nova na própria política. Foi a política — `pol_usuario_leitura` passou a ser "eu, e quem divide ambiente comigo" — porque aqui **não há impasse estrutural**: o vínculo existe, a política é que não o consultava. Furar por conveniência é o que B-D19 proíbe; o I-23 tinha acabado de receber a mesma resposta. A escrita continua "só eu" (`pol_usuario_escrita`), e `senha_hash` continua inalcançável por privilégio de coluna (V8). O que o co-membro passa a ver é a linha cadastral: nome, e-mail, telegram.
+
+**b) A porta é auditada.** Conceder e revogar acesso ganharam gatilho (`tg_auditar_usuario_ambiente`, entidade `Acesso`). B-D82 dizia que a auditoria de domínio não muda — e não mudou; o que faltava era a porta em si deixar rastro: "quem colocou fulano aqui, e quando" é exatamente a pergunta que uma trilha existe para responder. Vínculos criados no cadastro entram com autor nulo, como as categorias sistêmicas — o sistema agindo sozinho se registra assim desde a V10.
+
+**c) Dono não se transfere — por ausência de política.** `usuario_ambiente` não tem política de UPDATE: nem o dono promove um substituto, nem um convidado se promove, nem por injeção. Transferência de posse é conversa que não aconteceu; quando acontecer, ganhará política própria.
+
+**d) Renomear e apagar ambiente já encontram o banco certo.** `pol_ambiente_vinculado` (FOR ALL) deixaria qualquer membro alterar a linha do ambiente. Foi dividida: leitura para membros, UPDATE só para o dono, INSERT e DELETE sem política (nascem pelas portas estreitas; apagar é a conversa adiada). Não existe endpoint de renomear — mas quando existir, o RLS já recusa o convidado sozinho, que é como B-D76 manda.
+
+**e) O 403 de B-D83 carrega um marcador estável.** `motivo: "SEM_ACESSO_AO_AMBIENTE"` além da frase — a tela decide pelo marcador, nunca pelo texto. E a conferência não cobre `/api/auth/**`: a renovação é a rota de fuga, e `ambienteParaRenovacao` já fazia a troca silenciosa para um ambiente próprio (foi escrita prevendo este caso).
+
+**f) `dono` nas listagens de ambiente.** `GET /api/ambientes` e o perfil marcam cada item: a lista agora mistura próprios e emprestados, e a tela precisa saber onde há porta e onde escrever "compartilhado comigo".
+
+# 4k. Compartilhamento de CONTA (29/07/2026) — desenho, ANTES do código
+
+Um segundo modo, diferente do §4j e complementar a ele. **Nada aqui foi implementado.**
+
+| | Compartilhar **ambiente** (§4j) | Compartilhar **conta** (§4k) |
+|---|---|---|
+| Onde a pessoa trabalha | Dentro do ambiente do dono | No ambiente **dela** |
+| Categorias | As do dono | As dela |
+| Mapa de gastos | Compartilhado | **Separado** |
+| Saldo e fatura | Compartilhados | Compartilhados |
+| Serve para | "gerimos a casa juntos" | "dividimos uma conta, orçamentos separados" |
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D85 | **O saldo atravessa ambientes; a classificação não.** É a regra que resume o modo inteiro | Descrição dele: cada um vê todos os lançamentos da conta, mas só os próprios trazem categoria — *"no meu mapa de gastos somente aparecem os meus lançamentos, pois eu tenho categoria neles"*. O mapa não precisa de filtro novo para isso: ele já recorta por ambiente, e o lançamento do outro tem categoria de outro ambiente. **A separação cai da estrutura, não de uma regra escrita** |
+| B-D86 | **Isto REABRE o I-23, e de propósito** | Uma hora antes, B-D78/B-D79 fecharam o I-23 **proibindo** a conta de ir para outro ambiente. Este modo pede exatamente isso — e a resposta melhor não é proibir o caso, é **definir o que ele significa**. B-D78 continua valendo e não conflita: ali quem levava a conta era o convidado, **unilateralmente**; aqui é o dono **concedendo**. A diferença é quem decide |
+| B-D87 | **Três consultas passam a atravessar ambientes; uma continua não atravessando** | Saldo, extrato e fatura precisam somar tudo — senão os dois veem números diferentes e, no caso da fatura, alguém paga menos do que deve e descobre com juros. O mapa continua recortado por ambiente, e não muda nada. Fazer as três atravessarem exige `SECURITY DEFINER`, e **o impasse é real e inevitável**: por construção uma pessoa não pode ver os lançamentos da outra pela política, e mesmo assim precisa somá-los. Seria a **quarta exceção** do projeto (B-D19) e a primeira em consulta de leitura |
+| B-D88 | **Consequência de privacidade, assumida em voz alta**: cada um passa a saber que um valor se moveu sem ver no quê | É o próprio ponto de uma conta dividida — mas é escolha, não detalhe técnico, e por isso está escrita |
+| B-D89 | **O extrato mostra do lançamento alheio: valor, data, forma de pagamento e quem.** Sem categoria e **sem descrição** | Basta para o saldo bater com o extrato do banco. A descrição fica de fora junto com a categoria pelo mesmo motivo prático: é texto livre, e é onde as pessoas escrevem o que não pretendiam dividir — *"presente da Luciana"* é exatamente o caso |
+| B-D90 | **Quem recebe escolhe em qual ambiente dela a conta aparece, ao aceitar** | Diferente do compartilhamento de ambiente, que é imediato (B-D80): aqui há uma escolha que **só ela pode fazer**, e não dá para adivinhar. Cair no ambiente ativo mandaria a conta doméstica para o PJ sem aviso, e os gastos iriam para o mapa errado até alguém notar — e notar é difícil, porque nada avisa. O dono escolher entre os ambientes dela também não serve: exporia como ela organiza a própria vida, o que a conta compartilhada não pedia |
+| B-D91 | **Só o dono do ambiente onde a conta vive pode compartilhá-la** | Coerente com B-D76: repartir acesso é **porta**, não **dinheiro**. Quem recebeu acesso ao ambiente usa a conta à vontade, mas não a passa adiante — senão o acesso se espalha sem o dono saber, e ele só enxergaria a lista final, nunca a cadeia |
+
+## O schema já aguenta, e isso vale saber antes de desenhar demais
+
+O lançamento dela numa conta sua **já é estruturalmente válido hoje**. A chave composta `(ambiente_id, conta_id) → conta_ambiente` só exige que a conta esteja ligada ao ambiente dela — que é o que o compartilhamento cria. E `(ambiente_id, categoria_id) → categoria` já garante que ela use categoria do ambiente dela.
+
+Nenhuma tabela nova para o lançamento. O que falta é a **permissão para criar aquele vínculo** e as **consultas que atravessam**.
+
+## A execução, decidida antes do código (29/07/2026) — B-D92 a B-D97
+
+Ele pediu que os quatro furos da execução fossem discutidos antes de qualquer linha, e a leitura do código antes da conversa mostrou que **dois deles eram piores do que o desenho de princípio supunha**. Os achados vêm primeiro porque foram eles que moldaram as decisões.
+
+### Achado 1 — do jeito que a V15 ficou, a convidada tomaria a conta
+
+`app_contas_proprias()` significa *"conta ligada a um ambiente de que eu sou dono"*. Depois do compartilhamento, a conta do Abner está ligada ao ambiente **dela**, que ela é dona — então, para o banco, a conta dele passa a ser **própria dela**. Duas consequências, ambas com política já escrita:
+
+- `pol_ca_desvincular` a deixaria **desvincular a conta do ambiente do dono**, e a conta desapareceria para ele;
+- `pol_ca_vincular` a deixaria repassar a conta para um terceiro ambiente dela — que é exatamente o que B-D91 proíbe em palavras e o banco não.
+
+Não é um furo da V15: é um significado que só se rompe quando a conta passa a viver em ambiente alheio, e até aqui isso não existia.
+
+### Achado 2 — revogar não pode ser um DELETE
+
+`fk_lancamento_conta (ambiente_id, conta_id) → conta_ambiente` é `ON DELETE RESTRICT`. Assim que ela lançar **uma vez**, apagar o vínculo é recusado pelo banco. E apagar os lançamentos dela junto seria pior que o erro: aquele dinheiro saiu da conta de verdade, então o saldo do dono passaria a divergir do extrato do banco — o sintoma que P1 e R1 existem para não acontecer.
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D92 | **`conta_ambiente` ganha `origem`, um booleano: o ambiente onde a conta nasceu** | É o Achado 1, e o conserto é o mesmo idioma de `usuario_ambiente.dono` (B-D75) — um booleano que responde uma pergunta só, com índice único parcial garantindo **uma origem por conta**. `app_contas_proprias()` passa a exigir `dono AND origem`, e aí "minha conta" volta a significar minha. Vincular a **própria** conta num segundo ambiente seu (B-D18) continua valendo e nasce sem origem, porque a conta já nasceu em outro lugar |
+| B-D93 | **Revogar é `encerrado_em`, não `DELETE`** | É o Achado 2. O vínculo encerrado some da vista dela e os lançamentos ficam onde estão — no ambiente dela, com as categorias dela, somando no saldo dele, porque o dinheiro realmente passou pela conta. Custo assumido em voz alta: **toda** leitura de conta passa a depender de um filtro, e esquecê-lo em um lugar ressuscita o acesso em silêncio. Por isso o filtro mora dentro de `app_contas_do_usuario()`, num lugar só, e não espalhado por política e consulta |
+| B-D94 | **O convite é uma linha que SOME ao ser resolvido** | Aceitar cria o vínculo e apaga o convite; recusar só apaga. A verdade do compartilhamento é **o vínculo**, nunca uma coluna de situação — duas fontes para o mesmo fato é o defeito que o I-01 já custou uma vez neste projeto. A trilha que uma situação permanente daria ("quem convidou, quem recusou, quando") fica em `registro_auditoria` pelo gatilho, que é onde ela pertence |
+| B-D95 | **Ela lança e paga. Renomear, encerrar, mexer nas formas de pagamento e repassar adiante são do dono** | Coerente com B-D76 e com B-D91: a conta aparece na tela de duas pessoas, e quem abriu a porta responde por ela. Consequência concreta: `pol_conta_vinculada` (`FOR ALL`) se divide em leitura e escrita, como a V15 fez com `ambiente`. Diferença que vale marcar contra o §4j: **lá** encerrar conta era dinheiro (B-D76), porque quem encerrava estava dentro do ambiente do dono; **aqui** ela não está |
+| B-D96 | **As três funções que atravessam, com o mesmo porteiro na primeira linha** | `app_saldo_da_conta(conta)` → realizado e previsto; `app_extrato_da_conta(conta, inicio, fim)` → as linhas de B-D89; `app_total_da_fatura(fatura)` → compras e pagamentos. Cada uma começa conferindo `conta_id IN (SELECT app_contas_do_usuario())` e levanta exceção se não — sem isso, `SECURITY DEFINER` viraria "leia qualquer conta do sistema pelo UUID". É a **quarta exceção** de B-D19 e a primeira em leitura, com o impasse de B-D87: por construção uma pessoa não pode ver os lançamentos da outra pela política, e mesmo assim precisa somá-los |
+| B-D97 | **O recorte de B-D89 mora NA FUNÇÃO, não na tela** | `app_extrato_da_conta` não devolve `descricao` nem `categoria_id` do lançamento alheio — não é filtro de exibição, é coluna que não sai do banco. A tela não tem como vazar o que nunca recebeu, e um `JSON` distraído no controlador não vira incidente de privacidade |
+
+# 4l. Cartão compartilhado (29/07/2026) — B-D98 a B-D103
+
+Pedido dele na mesma conversa: *"compartilhamento de conta e depois de cartão"*. Desenhado junto, entregue depois — a V16 leva conta, a V17 leva cartão.
+
+**O que já estava respondido pela estrutura, e por isso não foi discutido:** o cartão **é** uma conta (B-D47, `cartao.conta_id` é PK e FK), então compartilhar cartão é compartilhar a conta do contrato — nenhum mecanismo novo, exatamente como B-D74 disse do ambiente. E o pagamento da fatura tem duas pernas (B-D59): se ela paga, a perna bancária é conta dela, no ambiente dela, e a perna do cartão cai no ambiente dela também, porque é lá que o cartão compartilhado aparece. Estruturalmente pronto; o que faltava era decidir o produto.
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D98 | **Compartilhar cartão é compartilhar a conta do contrato.** Sem tabela nova, sem convite próprio | O cartão é uma conta desde a V12. Um segundo mecanismo de compartilhamento significaria duas portas para a mesma pergunta ("quem vê esta conta?") e duas chances de divergirem. O que muda em relação a uma conta comum é o que se pode **fazer** com ela — B-D100 e B-D101 — e não como o acesso nasce |
+| B-D99 | **Os dois pagam a fatura, cada um da própria conta bancária, e a quitação soma os dois** | É o caso real de cartão dividido: cada um paga a parte dele, e pagamento parcial de cada lado é legítimo desde B-D57. Custo assumido: o dono vê a fatura quitada **sem ver de qual conta saiu o dinheiro dela** — a perna bancária vive no ambiente dela e não atravessa. É B-D88 outra vez, e a alternativa (ela transfere e ele paga) transformaria um pagamento na vida em duas operações no sistema, perdendo o rastro de quem pagou o quê |
+| B-D100 | **Fechar fatura é dos dois; reabrir é só do dono** | Fechar é rotina de mês e quem está dentro faz. Reabrir **desfaz o que o outro fez** num flag que os dois veem, e é aí que duas mãos no mesmo ciclo viram briga. As duas regras saem de **duas políticas permissivas** separadas pelo valor de `fechada_em` na linha nova — não é regra em código, é RLS, e por isso vale para qualquer caminho que um dia atualize a fatura |
+| B-D101 | **Emitir adicional e encerrar o cartão são porta do dono** | Emitir cria plástico sob o limite do contrato **dele**, e encerrar tira o cartão da tela dos dois. Mesma linha de B-D95, e a simetria importa: a lista do que ela pode fazer é a mesma numa conta comum e num cartão, mais fechar fatura |
+| B-D102 | **O extrato alheio mostra a parcela — `3/10` — e as futuras** | As próximas parcelas são dinheiro **dele** preso no limite **dele**, e faturas de meses que ainda não chegaram já nascem com valor comprometido. Sem isso, o limite informativo (B-D48) para de servir para planejar exatamente no caso em que planejar importa mais. Custo em voz alta, e é maior que o de B-D89: *"3/10 de R$ 200"* revela que a compra foi de R$ 2.000 — mais do que um lançamento avulso revelaria |
+| B-D103 | **`cartao_emitido.usuario_id` continua nulo. Quem comprou vem de `criado_por`** | A V12 reservou o campo esperando o convite (B-D53), e a hipótese natural era ligá-lo agora, restringindo cada pessoa ao próprio plástico. Ele escolheu o contrário — ela seleciona qualquer emitido — e **o argumento que eu usei contra estava errado**: `lancamento.criado_por` já carimba quem lançou, e é dele que o "quem" de B-D89 sai. O que a escolha custa é só o extrato **por plástico** ficar torto se ela selecionar o cartão errado; o caso dos dezessete cartões segue atendido |
+
+## O que a implementação acrescentou (V16 e V17, 29/07/2026 — a a g, para revisão)
+
+As decisões acima valeram inteiras. Estas sete vieram por necessidade que só o código revelou — **sem número de B-D de propósito: os números são das conversas, e estas ainda não passaram por uma**. Duas delas são defeitos que os testes apanharam, e estão marcadas.
+
+**a) `app_contas_nao_emprestadas()`, e por que `app_contas_proprias()` não servia.** B-D95 diz "renomear e encerrar são do dono", e B-D76 diz que encerrar conta é **dinheiro** — quem entra no ambiente por convite pode. As duas estão certas e falam de casos diferentes, mas um predicado só não atende as duas: "ser dono" tiraria do convidado do ambiente um poder que B-D76 lhe deu. A regra que satisfaz as duas é **estar no ambiente onde a conta nasceu**, e ela virou a terceira irmã de `app_contas_do_usuario`. **Defeito apanhado por `CompartilhamentoApiTest.convidadaOperaODinheiro`**, que existia desde a V15 e falhou na primeira rodada da V16.
+
+**b) O limite do cartão não atravessava — e é o número que existe para bater com o app do banco.** `limiteConsumido` vinha de uma soma que respeita a RLS, então as compras de quem divide o cartão **não entravam**: o dono via 0,00 consumido num cartão com R$ 2.000 comprometidos em parcelas dela. B-D48 diz que o limite é informativo, e informativo errado é pior que ausente. **Defeito apanhado por `CartaoCompartilhadoApiTest.aParcelaAlheiaAparece`**, na última asserção — a que eu quase não escrevi.
+
+**c) O convite precisou de duas funções que o desenho não previu.** Antes do aceite, **a conta é invisível para quem foi convidado** (a política pede o vínculo que o aceite vai criar) e **o convidado é invisível para quem convida** (`pol_usuario_leitura` é "eu, e quem divide ambiente comigo"). Sem elas, o convite chegaria como "alguém quer dividir algo com você" e a lista do dono mostraria um uuid. São impasses da mesma natureza de `app_usuario_por_email` — um deles é literalmente o mesmo pelo avesso.
+
+**d) Revogar também virou função, pelo motivo mais curioso do inventário: o dono precisa encerrar uma linha que ele não pode ver.** `pol_ca_leitura` mostra a cada um só o próprio lado do vínculo, e isso é deliberado (B-D90). A alternativa era alargar a política e entregar ao dono os ids dos ambientes dela — pouco em aparência, e o suficiente para contar quantos são e correlacionar entre contas.
+
+**e) `podeCompartilhar` é um campo separado de `origem` na resposta da API.** São perguntas parecidas que não são a mesma: `origem` responde quem mexe no dinheiro da conta, `podeCompartilhar` responde quem mexe na porta. Confundi-las foi a primeira versão do código, e o sintoma foi um 500 na tela de contas de quem entrou no ambiente por convite.
+
+**f) O banco do cartão dividido ganhou frase própria.** O contrato aponta para uma conta de outra pessoa, invisível para quem recebeu o cartão — e o texto de fallback que existia, "(conta removida)", **mentiria**: a conta existe e está bem. Agora responde "(banco de quem dividiu o cartão)", que é verdade nos dois casos.
+
+**g) A conferência do banco na compra deixa de existir no cartão dividido.** `POST /api/lancamentos` conferia que o cartão pertence à conta escolhida — proteção real contra escolher Nubank e gravar no C6. Para quem recebeu o cartão, o banco do contrato é invisível, e a pergunta não tem resposta possível do lado dela. **A checagem não afrouxou: ela deixou de existir num contexto em que não significa nada**, e continua inteira no caminho normal. Foi o único ponto em que o desenho de §4l passou por cima de uma regra existente sem ter previsto.
+
+# 4m. Correções pedidas por ele no primeiro uso (29/07/2026) — B-D104 e B-D105
+
+Ele foi testar o compartilhamento de cartão e bateu numa recusa minha. As duas decisões abaixo saíram daí.
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D104 | **Ter acesso ao ambiente NÃO impede receber a conta.** As duas concessões convivem e são independentes | Frase dele: *"dar acesso ao ambiente inteiro é a mesma coisa que dar minha senha. Porém ainda sim eu preciso poder escolher uma conta que quero que ela tenha acesso lá do ambiente dela"*. O 409 que eu havia posto — *"ela já vê esta conta"* — **era um erro conceitual meu, não uma decisão dele**: confundia **ver** a conta com **ter** a conta. Quem entra no meu ambiente trabalha dentro dele, com as MINHAS categorias e no MEU mapa; a conta dividida aparece no ambiente DELA, com as categorias dela e no mapa dela. O §4k abre chamando o segundo modo de *"complementar"* ao primeiro, e a recusa proibia exatamente a complementaridade. Independência confirmada por ele: revogar a conta não tira o ambiente, e remover o ambiente não tira a conta — foram dois atos, em momentos diferentes |
+| B-D105 | **O `telegramId` entra no cadastro, opcional, com validação frouxa e sem caminho de edição** | Pedido dele para preparar a etapa 3. A coluna existe desde a V1 e o caminho de escrita não existia por impasse real: no cadastro não há identidade na sessão, então `pol_usuario_escrita` recusa qualquer UPDATE posterior — o valor tem de entrar na mesma inserção, e a função do cadastro ganhou um quarto parâmetro (V18). **A validação é frouxa de propósito**: o bot não existe, e não há como saber se ele vai querer o id numérico ou o `@usuario` — regra apertada agora tem chance de barrar o valor certo, e valor errado não causa dano enquanto não há consumidor. **Custo registrado**: sem caminho de edição, quem digitar errado hoje não corrige sozinho. É pequeno porque o campo não é o login (contraste com B-D71, onde a ausência da edição é a proteção) |
+
+## O que a implementação acrescentou (h)
+
+**h) O vazio tem de virar nulo, e isso não é higiene — é o índice.** `ux_usuario_telegram` é **parcial** (`WHERE telegram_id IS NOT NULL`), justamente para várias contas conviverem sem Telegram. String vazia gravada seria um valor *real* para ele, e o **segundo** cadastro sem Telegram falharia por duplicidade num campo que ninguém preencheu. `NULLIF(btrim(...), '')` mora dentro da função, e não na tela, porque a tela não é o único caminho.
+
+# 4n. O PLÁSTICO como unidade (30/07/2026) — B-D106 a B-D110
+
+Ele foi usar o cartão compartilhado da V17 e o modelo estava errado. Descrição dele, e é o que reorganiza tudo:
+
+> *"A fatura no mundo real é composta por várias mini faturas. Eu recebo uma fatura que traz o extrato de cada um dos cartões mas com um montante só no final para pagar. (…) Tenho um contrato que vence em um determinado dia com limite total de 30 mil. Crio um adicional em nome da Luciana, que segue o mesmo fechamento e vencimento, e que eu posso opcionalmente dizer que tem 1.000 dentro dos meus 30.000. A questão do compartilhamento é poder dar para ela, lá no meio de pagamento do lançamento, a possibilidade de apontar este cartão adicional que está em nome dela porém dentro da minha fatura."*
+
+**O que o modelo já tinha certo:** a fatura pertence ao contrato, o lançamento sabe qual plástico fez a compra (`cartao_emitido_id`, B-D64/V13) e `limite_proprio` existe desde a V12. As "mini faturas" são um agrupamento do que já está gravado — nenhuma estrutura nova para isso.
+
+**O que estava errado:** a V17 fez a unidade do compartilhamento ser a **conta do contrato**, então dividir um cartão entregava os dez plásticos.
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D106 | **A unidade é o PLÁSTICO** (`cartao_emitido`), nunca o contrato. **Revoga B-D98** | *"Quero compartilhar com ela somente 1 cartão virtual."* O contrato é dele e continua sendo; o que se reparte é um plástico dentro dele, com o limite próprio que ele opcionalmente definiu. O vínculo da conta do cartão com o ambiente dela continua existindo — sem ele o lançamento dela não tem onde morar (chave composta de B-D2) —, mas ele deixa de ser a **concessão**: passa a ser consequência dela. Custo assumido: **plástico emitido depois NÃO vai junto**, tem de ser dividido à parte. É o preço de a unidade ser explícita |
+| B-D107 | **Quem paga a fatura é o dono do contrato. Ela não paga** | *"No final a conta vai chegar com o total e eu sou o responsável para fazer esse pagamento, seja ela me transferir ou seja eu pagar essa fatura de alguma conta minha."* **Revoga B-D99**, escolhido no dia anterior, e ele sabia disso ao decidir: *"talvez vamos regredir sim, mais pra frente a gente monta uma opção de cada um pagar uma parte e até mesmo ela pagar uma fatura inteira — a gente estuda isso depois"*. Fica como **conversa adiada**, não descartada |
+| B-D108 | **Fechar e reabrir fatura voltam a ser só do dono. Revoga B-D100** | Consequência de B-D107, e ele confirmou: a fatura é o documento do contrato, e quem responde por ela paga por ela. Ela agiria sobre um ciclo que não paga e cujo total não vê. Some a política `pol_fatura_fechar`, que a V17 tinha criado para o membro |
+| B-D109 | **B-D89 CONFIRMADO no cartão: a descrição do lançamento alheio continua fora.** Só o "quem", o valor, a data, o plástico e a parcela | Ele considerou reverter — o exemplo dele mostrava "youtube, 50" e "claude, 100" identificados — e **decidiu manter**. O que fica privado, na frase dele, é *"a categoria, pois isso é de cada um"*; a descrição fica junto pelo motivo de B-D89, que não mudou: é texto livre, e é onde se escreve o que não se pretendia dividir. Custo aceito: conferir o extrato contra o e-mail do banco fica pior, porque as linhas do outro dizem só "compra de Abner" |
+| B-D110 | **Ela vê o extrato do PLÁSTICO dela, não o do contrato.** E não vê o total da fatura | Ela tem acesso a um plástico, então o extrato que a tela dela mostra é o daquele plástico — com as compras de **todos** que têm acesso a ele (dele e dela), que é o caso do "cartão de assinaturas" que os dois usam. Os outros nove não entram: ela não tem acesso a eles. O total do contrato também não, porque ela não paga (B-D107). O limite exibido é o **do plástico**; sem limite próprio, é o do contrato — e isso ele aceitou explicitamente: *"privacidade só existe se ela fizer um cartão exclusivo pra ela com contrato em banco"* |
+
+## O que isto custa em código já escrito
+
+A V17 saiu ontem e a V19 desmonta a parte dela que decidia **quem pode o quê**: a unidade, o pagamento e o fechamento. O que **sobrevive inteiro** é a maquinaria de atravessar ambientes — `app_total_da_fatura`, `app_extrato_da_fatura`, as políticas de leitura de `cartao` e `fatura`, e o `limiteConsumido` que passou a somar os dois lados. Era a parte difícil, e ela não dependia da unidade.
+
+Vale registrar sem rodeio: a V17 foi desenhada e implementada no mesmo dia, com decisões tomadas antes do código — e ainda assim o modelo de negócio só apareceu quando ele **usou** a tela. Nenhuma quantidade de desenho substitui isso.
+
 # 5. Revisões registradas (R1–R6, sessão de requisitos)
 
 Decisões que substituíram decisões anteriores durante o próprio processo. O motivo da mudança é tão importante quanto a decisão final.
@@ -334,3 +509,8 @@ Decisões que substituíram decisões anteriores durante o próprio processo. O 
 | V12 | Domínio, fatia 2: `cartao`, `cartao_emitido`, `fatura` + `fatura_id` e as colunas de parcelamento no lançamento; `PAGAMENTO_FATURA` como quarta sistêmica. **Sem `parcela`** (B-D55) e **sem `regra_recorrencia`** (B-D56, entrega própria). Sai junto da T-06 e resolve I-07. Verificada por `CartaoApiTest` | ✔ |
 | V13 | `lancamento.cartao_emitido_id` (B-D64): o lançamento passa a saber qual plástico ou virtual fez a compra, para o extrato da fatura ter dono. `ck_lancamento_cartao_exige_fatura` denunciou um defeito da V12 no primeiro parcelamento | ✔ |
 | V14 | `app_criar_ambiente(nome)` (B-D70): porta estreita para criar ambiente adicional pela tela. Verificada por `PerfilApiTest` | ✔ |
+| V15 | **Compartilhamento de ambiente** (§4j, B-D74 a B-D84): `usuario_ambiente.dono` com índice parcial de um dono por ambiente; `app_ambientes_proprios`, `app_contas_proprias`, `app_membros_dos_meus_ambientes`, `app_usuario_por_email`; políticas de `usuario_ambiente`, `conta_ambiente`, `ambiente` e `usuario` divididas por verbo; auditoria da porta. Verificada por `CompartilhamentoApiTest` (16) | ✔ |
+| V16 | **Compartilhamento de conta** (§4k, B-D85 a B-D97): `conta_ambiente.origem` e `encerrado_em` com retroalimentação e índice parcial de uma origem por conta; `conta_convite`; `app_contas_nao_emprestadas`; as funções que ATRAVESSAM ambientes (`app_saldo_da_conta`, `app_extrato_da_conta`) — a quarta exceção de B-D19 e a primeira em leitura; aceite, revogação e as duas funções do convite. Fecha os dois Achados da seção. Verificada por `CompartilhamentoContaApiTest` (21) | ✔ |
+| V17 | **Cartão compartilhado** (§4l, B-D98 a B-D103): `app_total_da_fatura` e `app_extrato_da_fatura`; políticas de `cartao`, `cartao_emitido` e `fatura` divididas por verbo, com **fechar dos dois e reabrir do dono** separados pelo valor de `fechada_em` na linha nova (B-D100). Nenhuma tabela nova — compartilhar cartão é compartilhar a conta do contrato (B-D98). Verificada por `CartaoCompartilhadoApiTest` (8) | ✔ |
+| V19 | **O PLASTICO como unidade** (§4n, B-D106 a B-D110): `cartao_emitido_ambiente`; `conta_convite.cartao_emitido_id`; `app_emitidos_liberados`, aceite, revogação e lista do plástico; `app_total_do_plastico`; `pol_cartao_emitido_leitura` com as duas origens de visibilidade; `app_extrato_da_fatura` recortando por plástico; `pol_fatura_fechar` removida (B-D108). Revoga B-D98/B-D99/B-D100 da V17. Verificada por `CartaoCompartilhadoApiTest` (12), reescrito | ✔ |
+| V18 | **Telegram no cadastro** (B-D105): `auth_cadastrar_usuario` ganha o quarto parâmetro `telegram_id`, com `DROP` + `CREATE` para não deixar duas portas de cadastro. A coluna e o índice parcial existem desde a V1. Verificada por `AutenticacaoFluxoTest` | ✔ |

@@ -53,11 +53,18 @@ public class AmbienteControlador {
      * <p>O ativo vem junto de proposito: a tela precisa marcar um deles, e
      * descobrir isso numa segunda chamada seria dois caminhos de leitura para
      * a mesma pergunta.</p>
+     *
+     * <p>{@code dono} veio com a V15: com compartilhamento, a lista deixa de
+     * ser so "os meus" — e a tela precisa saber onde ha porta (convidar,
+     * remover acesso) e onde a pessoa e convidada.</p>
      */
     @GetMapping
     public Map<String, Object> listar() {
+        UUID usuarioId = ContextoRequisicao.usuarioId().orElseThrow();
+        var proprios = ambientes.ambientesProprios(usuarioId);
+
         List<AmbienteResposta> lista = ambientes.listarDoUsuario().stream()
-            .map(AmbienteResposta::de)
+            .map(a -> AmbienteResposta.de(a, proprios.contains(a.getId())))
             .toList();
 
         return Map.of(
@@ -92,9 +99,9 @@ public class AmbienteControlador {
         String nome
     ) {}
 
-    public record AmbienteResposta(UUID id, String nome, OffsetDateTime criadoEm) {
-        static AmbienteResposta de(Ambiente a) {
-            return new AmbienteResposta(a.getId(), a.getNome(), a.getCriadoEm());
+    public record AmbienteResposta(UUID id, String nome, OffsetDateTime criadoEm, boolean dono) {
+        static AmbienteResposta de(Ambiente a, boolean dono) {
+            return new AmbienteResposta(a.getId(), a.getNome(), a.getCriadoEm(), dono);
         }
     }
 }

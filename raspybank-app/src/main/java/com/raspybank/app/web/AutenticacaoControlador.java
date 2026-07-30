@@ -13,6 +13,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -51,7 +52,7 @@ public class AutenticacaoControlador {
             @Valid @RequestBody PedidoCadastro pedido) {
 
         var resultado = onboarding.cadastrar(
-            pedido.nome(), pedido.email(), pedido.senha());
+            pedido.nome(), pedido.email(), pedido.senha(), pedido.telegramId());
 
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
             "usuarioId",  resultado.usuarioId(),
@@ -226,7 +227,24 @@ public class AutenticacaoControlador {
         @NotBlank
         @Size(min = 10, message = "A senha precisa ter ao menos 10 caracteres")
         @Size(max = 72, message = "A senha pode ter no maximo 72 caracteres")
-        String senha
+        String senha,
+
+        /**
+         * OPCIONAL, e e ele que vai ligar a pessoa ao bot (etapa 3 do roteiro).
+         * A coluna existe desde a V1, com indice unico parcial; o caminho de
+         * escrita chegou na V18.
+         *
+         * <p>A validacao e deliberadamente FROUXA: aceita o id numerico
+         * ({@code 123456789}) e o usuario ({@code @abner}), porque o bot ainda
+         * nao existe e nao ha como saber qual dos dois ele vai querer. Uma regra
+         * apertada agora tem chance de barrar justamente o valor certo — e o
+         * valor errado nao causa dano nenhum enquanto nao existe consumidor.
+         * Quando o bot chegar, ele aperta isto com a forma que ele exigir.</p>
+         */
+        @Size(max = 64, message = "telegramId pode ter no maximo 64 caracteres")
+        @Pattern(regexp = "|@?[A-Za-z0-9_]{3,63}",
+                 message = "telegramId aceita numeros, letras, _ e um @ na frente")
+        String telegramId
     ) {}
 
     public record PedidoLogin(

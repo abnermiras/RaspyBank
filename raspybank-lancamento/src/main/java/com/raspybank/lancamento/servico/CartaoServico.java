@@ -74,6 +74,7 @@ public class CartaoServico {
     private final ContaAmbienteRepositorio vinculos;
     private final ContaFormaPagamentoRepositorio formasDePagamento;
     private final LancamentoRepositorio lancamentos;
+    private final CompartilhamentoContaServico compartilhamentos;
 
     @PersistenceContext
     private EntityManager em;
@@ -84,7 +85,8 @@ public class CartaoServico {
                          ContaRepositorio contas,
                          ContaAmbienteRepositorio vinculos,
                          ContaFormaPagamentoRepositorio formasDePagamento,
-                         LancamentoRepositorio lancamentos) {
+                         LancamentoRepositorio lancamentos,
+                         CompartilhamentoContaServico compartilhamentos) {
         this.cartoes = cartoes;
         this.emitidos = emitidos;
         this.faturas = faturas;
@@ -92,6 +94,7 @@ public class CartaoServico {
         this.vinculos = vinculos;
         this.formasDePagamento = formasDePagamento;
         this.lancamentos = lancamentos;
+        this.compartilhamentos = compartilhamentos;
     }
 
     // =========================================================================
@@ -111,10 +114,7 @@ public class CartaoServico {
         List<UUID> ids = lista.stream().map(Cartao::getContaId).toList();
 
         // Duas consultas para a tela inteira, e nao duas por cartao.
-        Map<UUID, SaldoDaConta> saldos = new HashMap<>();
-        for (SaldoDaConta s : lancamentos.saldos(ids)) {
-            saldos.put(s.contaId(), s);
-        }
+        Map<UUID, SaldoDaConta> saldos = saldosQueAtravessam(ambienteId);
 
         Map<UUID, List<CartaoEmitido>> porCartao = new HashMap<>();
         for (CartaoEmitido e : emitidos.findByCartaoIdIn(ids)) {
@@ -124,12 +124,37 @@ public class CartaoServico {
         Map<UUID, String> nomesDeBanco = nomesDasContas(
             lista.stream().map(Cartao::getContaBancoId).distinct().toList());
 
+        Map<UUID, Boolean> origemPorCartao = new HashMap<>();
+        for (ContaAmbiente v : vinculos.findByContaIdInAndEncerradoEmIsNull(ids)) {
+            if (v.getAmbienteId().equals(ambienteId)) {
+                origemPorCartao.put(v.getContaId(), v.isOrigem());
+            }
+        }
+
+        boolean souDonoDoAmbiente = souDonoDoAmbiente(ambienteId);
+
+        // Uma consulta para todos os plasticos da tela: o consumido POR plastico
+        // e o numero que a V19 passou a exigir (B-D110) — e do lado dele ele
+        // tambem serve, porque e o que transforma a fatura nas "mini faturas" do
+        // e-mail do banco.
+        Map<UUID, BigDecimal> porPlastico = consumidoPorPlastico(ambienteId);
+
         return lista.stream()
-            .map(c -> new Resumo(
-                c,
-                nomesDeBanco.getOrDefault(c.getContaBancoId(), "(conta removida)"),
-                saldos.getOrDefault(c.getContaId(), SaldoDaConta.zeradoPara(c.getContaId())),
-                porCartao.getOrDefault(c.getContaId(), List.of())))
+            .map(c -> {
+                boolean origem = origemPorCartao.getOrDefault(c.getContaId(), true);
+                boolean podeCompartilhar = origem && souDonoDoAmbiente;
+
+                return new Resumo(
+                    c,
+                    nomeDoBanco(nomesDeBanco, c.getContaBancoId(), origem),
+                    saldos.getOrDefault(c.getContaId(), SaldoDaConta.zeradoPara(c.getContaId())),
+                    porCartao.getOrDefault(c.getContaId(), List.of()),
+                    origem,
+                    podeCompartilhar,
+                    podeCompartilhar && temPlasticoDividido(c.getContaId()),
+                    origem ? null : compartilhamentos.donoDaConta(c.getContaId()).nome(),
+                    porPlastico);
+            })
             .toList();
     }
 
@@ -137,14 +162,24 @@ public class CartaoServico {
     public Resumo resumo(UUID ambienteId, UUID cartaoId) {
         Cartao c = exigir(ambienteId, cartaoId);
 
-        SaldoDaConta saldo = lancamentos.saldos(List.of(cartaoId)).stream()
-            .findFirst()
-            .orElseGet(() -> SaldoDaConta.zeradoPara(cartaoId));
+        SaldoDaConta saldo = saldosQueAtravessam(ambienteId)
+            .getOrDefault(cartaoId, SaldoDaConta.zeradoPara(cartaoId));
 
-        String banco = nomesDasContas(List.of(c.getContaBancoId()))
-            .getOrDefault(c.getContaBancoId(), "(conta removida)");
+        boolean origem = vinculos.findById(new ContaAmbiente.Chave(cartaoId, ambienteId))
+            .map(ContaAmbiente::isOrigem)
+            .orElse(true);
+        boolean podeCompartilhar = origem && souDonoDoAmbiente(ambienteId);
 
-        return new Resumo(c, banco, saldo, emitidos.findByCartaoIdOrderByCriadoEm(cartaoId));
+        String banco = nomeDoBanco(
+            nomesDasContas(List.of(c.getContaBancoId())), c.getContaBancoId(), origem);
+
+        return new Resumo(
+            c, banco, saldo, emitidos.findByCartaoIdOrderByCriadoEm(cartaoId),
+            origem,
+            podeCompartilhar,
+            podeCompartilhar && temPlasticoDividido(cartaoId),
+            origem ? null : compartilhamentos.donoDaConta(cartaoId).nome(),
+            consumidoPorPlastico(ambienteId));
     }
 
     // =========================================================================
@@ -200,7 +235,7 @@ public class CartaoServico {
 
     @Transactional
     public Cartao alterar(UUID ambienteId, UUID cartaoId, String nome, BigDecimal limite) {
-        Cartao c = exigir(ambienteId, cartaoId);
+        Cartao c = exigirNaoEmprestado(ambienteId, cartaoId);
         c.renomear(nome);
         c.alterarLimite(limite);
 
@@ -223,7 +258,7 @@ public class CartaoServico {
     public Cartao reagendarCiclo(UUID ambienteId, UUID cartaoId,
                                  int diaVencimento, int diasParaFechamento, LocalDate hoje) {
 
-        Cartao c = exigir(ambienteId, cartaoId);
+        Cartao c = exigirNaoEmprestado(ambienteId, cartaoId);
         c.reagendarCiclo(diaVencimento, diasParaFechamento);
 
         YearMonth mesCorrente = YearMonth.from(hoje);
@@ -263,7 +298,7 @@ public class CartaoServico {
      */
     @Transactional
     public Cartao encerrar(UUID ambienteId, UUID cartaoId) {
-        Cartao c = exigir(ambienteId, cartaoId);
+        Cartao c = exigirNaoEmprestado(ambienteId, cartaoId);
         OffsetDateTime agora = OffsetDateTime.now();
 
         c.encerrar(agora);
@@ -294,7 +329,7 @@ public class CartaoServico {
      */
     @Transactional
     public Cartao reabrir(UUID ambienteId, UUID cartaoId) {
-        Cartao c = exigir(ambienteId, cartaoId);
+        Cartao c = exigirNaoEmprestado(ambienteId, cartaoId);
         c.reabrir();
         contas.findById(cartaoId).ifPresent(Conta::reabrir);
         return c;
@@ -309,7 +344,7 @@ public class CartaoServico {
                                 TipoCartaoEmitido tipo, String finalDoCartao,
                                 BigDecimal limiteProprio) {
 
-        exigir(ambienteId, cartaoId);
+        exigirNaoEmprestado(ambienteId, cartaoId);
         return emitidos.save(
             new CartaoEmitido(cartaoId, nomeTitular, tipo, finalDoCartao, limiteProprio));
     }
@@ -323,7 +358,7 @@ public class CartaoServico {
      */
     @Transactional
     public CartaoEmitido cancelarEmitido(UUID ambienteId, UUID cartaoId, UUID emitidoId) {
-        exigir(ambienteId, cartaoId);
+        exigirNaoEmprestado(ambienteId, cartaoId);
         CartaoEmitido e = exigirEmitido(cartaoId, emitidoId);
         e.cancelar(OffsetDateTime.now());
         return e;
@@ -331,7 +366,7 @@ public class CartaoServico {
 
     @Transactional
     public CartaoEmitido reativarEmitido(UUID ambienteId, UUID cartaoId, UUID emitidoId) {
-        exigir(ambienteId, cartaoId);
+        exigirNaoEmprestado(ambienteId, cartaoId);
         CartaoEmitido e = exigirEmitido(cartaoId, emitidoId);
         e.reativar();
         return e;
@@ -401,19 +436,153 @@ public class CartaoServico {
         }
     }
 
+    /**
+     * Os saldos das contas do ambiente, ATRAVESSANDO ambientes (B-D87).
+     *
+     * <p>Existe por um defeito que o teste do cartao dividido apanhou: o limite
+     * consumido vinha de {@code lancamentos.saldos}, que respeita a RLS — entao as
+     * compras de quem divide o cartao <b>nao entravam</b>. O dono via limite
+     * disponivel de sobra num cartao que estava perto do teto, e B-D48 diz que o
+     * numero existe justamente para bater com o app do banco.</p>
+     *
+     * <p>Uma consulta para a tela inteira, no formato de {@code ContaServico}: o
+     * {@code CROSS JOIN LATERAL} chama {@code app_saldo_da_conta} uma vez por
+     * vinculo, e quem enumera as contas e a propria tabela de vinculo — que a RLS
+     * ja filtra pelo lado de quem pergunta.</p>
+     */
+    @SuppressWarnings("unchecked")
+    private Map<UUID, SaldoDaConta> saldosQueAtravessam(UUID ambienteId) {
+        List<Object[]> linhas = em.createNativeQuery("""
+                SELECT ca.conta_id, s.realizado, s.previsto
+                  FROM conta_ambiente ca
+                  CROSS JOIN LATERAL app_saldo_da_conta(ca.conta_id) s
+                 WHERE ca.ambiente_id = :ambiente
+                   AND ca.encerrado_em IS NULL
+                """)
+            .setParameter("ambiente", ambienteId)
+            .getResultList();
+
+        Map<UUID, SaldoDaConta> saldos = new HashMap<>();
+        for (Object[] l : linhas) {
+            UUID contaId = (UUID) l[0];
+            saldos.put(contaId, new SaldoDaConta(contaId, (BigDecimal) l[1], (BigDecimal) l[2]));
+        }
+        return saldos;
+    }
+
     /** Mesmo recorte de B-D21/B-D25: id de outro ambiente e 404, nunca 403. */
     private Cartao exigir(UUID ambienteId, UUID cartaoId) {
-        if (vinculos.findById(new ContaAmbiente.Chave(cartaoId, ambienteId)).isEmpty()) {
+        if (vinculos.findById(new ContaAmbiente.Chave(cartaoId, ambienteId))
+                .filter(ContaAmbiente::estaAtivo)
+                .isEmpty()) {
             throw new RecursoNaoEncontrado("Cartao nao encontrado");
         }
         return cartoes.findById(cartaoId).orElseThrow(
             () -> new RecursoNaoEncontrado("Cartao nao encontrado"));
     }
 
+    /**
+     * O cartao nasceu neste ambiente — exigencia de alterar, reagendar, emitir,
+     * cancelar emitido, encerrar e reabrir (B-D101).
+     *
+     * <p>{@code pol_cartao_escrita} ja recusa no banco, e a checagem aqui existe
+     * porque a recusa da politica <b>nao produz erro</b>: o UPDATE nao encontra a
+     * linha, e o Hibernate transforma isso num 500 sobre estado obsoleto.</p>
+     *
+     * <p>Nao confundir com "ser dono do ambiente": quem entrou no ambiente por
+     * convite (V15) cria cartao, emite e encerra a vontade, porque ali isso e
+     * DINHEIRO (§2c). O que esta barrado e mexer no contrato de um cartao que
+     * nasceu na casa de outra pessoa.</p>
+     */
+    private Cartao exigirNaoEmprestado(UUID ambienteId, UUID cartaoId) {
+        Cartao c = exigir(ambienteId, cartaoId);
+
+        boolean emprestado = vinculos.findById(new ContaAmbiente.Chave(cartaoId, ambienteId))
+            .map(v -> !v.isOrigem())
+            .orElse(false);
+
+        if (emprestado) {
+            throw new OperacaoNaoPermitida(
+                "Este cartao foi dividido com voce. Lance e pague a fatura a vontade;"
+                    + " emitir adicional, mudar o limite e encerrar o cartao sao de quem"
+                    + " abriu o contrato.");
+        }
+        return c;
+    }
+
     private CartaoEmitido exigirEmitido(UUID cartaoId, UUID emitidoId) {
         return emitidos.findById(emitidoId)
             .filter(e -> e.getCartaoId().equals(cartaoId))
             .orElseThrow(() -> new RecursoNaoEncontrado("Cartao emitido nao encontrado"));
+    }
+
+    /**
+     * Quanto cada plastico consumiu, para todos os cartoes da tela.
+     *
+     * <p>Uma consulta, no formato das irmas: o {@code CROSS JOIN LATERAL} chama
+     * {@code app_total_do_plastico} uma vez por emitido, e quem enumera os
+     * emitidos e a propria tabela — que a RLS ja filtra pelas duas origens de
+     * visibilidade (nascido aqui, ou plastico liberado para mim).</p>
+     *
+     * <p>Por isso a mesma consulta serve aos dois lados: para o dono ela devolve
+     * os dez plasticos, para quem recebeu devolve o dela. Nenhum {@code if}.</p>
+     */
+    @SuppressWarnings("unchecked")
+    private Map<UUID, BigDecimal> consumidoPorPlastico(UUID ambienteId) {
+        List<Object[]> linhas = em.createNativeQuery("""
+                SELECT ce.id, t.previsto
+                  FROM cartao_emitido ce
+                  JOIN conta_ambiente ca ON ca.conta_id = ce.cartao_id
+                  CROSS JOIN LATERAL app_total_do_plastico(ce.id) t
+                 WHERE ca.ambiente_id = :ambiente
+                   AND ca.encerrado_em IS NULL
+                """)
+            .setParameter("ambiente", ambienteId)
+            .getResultList();
+
+        Map<UUID, BigDecimal> consumido = new HashMap<>();
+        for (Object[] l : linhas) {
+            consumido.put((UUID) l[0], (BigDecimal) l[1]);
+        }
+        return consumido;
+    }
+
+    /** Algum plastico deste cartao esta nas maos de mais alguem (B-D106)? */
+    private boolean temPlasticoDividido(UUID cartaoId) {
+        return (Boolean) em.createNativeQuery("""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM cartao_emitido_ambiente cea
+                      JOIN cartao_emitido ce ON ce.id = cea.cartao_emitido_id
+                     WHERE ce.cartao_id = :cartao
+                       AND cea.encerrado_em IS NULL
+                )
+                """)
+            .setParameter("cartao", cartaoId)
+            .getSingleResult();
+    }
+
+    /**
+     * O nome do banco do contrato — e a frase honesta quando ele nao e visivel.
+     *
+     * <p>No cartao dividido, o banco e uma conta de outra pessoa: quem recebeu o
+     * cartao nao a enxerga, e {@code nomesDasContas} volta vazio. O texto antigo
+     * — "(conta removida)" — <b>mentiria</b>, porque a conta existe e esta bem.
+     * A frase de agora e verdadeira nos dois casos.</p>
+     */
+    private static String nomeDoBanco(Map<UUID, String> nomes, UUID bancoId, boolean origem) {
+        String nome = nomes.get(bancoId);
+        if (nome != null) {
+            return nome;
+        }
+        return origem ? "(conta removida)" : "(banco de quem dividiu o cartao)";
+    }
+
+    private boolean souDonoDoAmbiente(UUID ambienteId) {
+        return (Boolean) em.createNativeQuery(
+                "SELECT :ambiente IN (SELECT app_ambientes_proprios())")
+            .setParameter("ambiente", ambienteId)
+            .getSingleResult();
     }
 
     private Map<UUID, String> nomesDasContas(List<UUID> ids) {
@@ -434,12 +603,36 @@ public class CartaoServico {
      * futuras ja existem como lancamentos desde a compra (F23), com data no
      * futuro, entao so o numero com previstos enxerga a divida contratada
      * inteira — que e o que o app do banco mostra (B-D48).</p>
+     *
+     * <p>Os quatro ultimos campos sao da V17 e tem o mesmo significado que em
+     * {@code ContaServico.Resumo} — inclusive a distincao que erra facil:
+     * {@code origem} libera o que e dinheiro no contrato (§2c), e
+     * {@code podeCompartilhar} libera a porta (B-D91).</p>
      */
     public record Resumo(Cartao cartao, String nomeDoBanco,
-                         SaldoDaConta saldo, List<CartaoEmitido> emitidos) {
+                         SaldoDaConta saldo, List<CartaoEmitido> emitidos,
+                         boolean origem, boolean podeCompartilhar,
+                         boolean compartilhado, String recebidoDe,
+                         Map<UUID, BigDecimal> consumidoPorPlastico) {
 
         public BigDecimal consumido() {
             return saldo.comPrevistos().abs();
+        }
+
+        /**
+         * O limite efetivo de um plastico: o proprio, se houver; senao o do
+         * contrato (B-D110).
+         *
+         * <p>E o "1.000 dentro dos 30.000" da descricao dele. Nulo em
+         * {@code limite_proprio} significa "usa o global", que e o caso comum.</p>
+         */
+        public BigDecimal limiteDoPlastico(CartaoEmitido e) {
+            return e.getLimiteProprio() != null ? e.getLimiteProprio() : cartao.getLimite();
+        }
+
+        /** Quanto ESTE plastico consumiu, com as parcelas futuras (F23). */
+        public BigDecimal consumidoDoPlastico(CartaoEmitido e) {
+            return consumidoPorPlastico.getOrDefault(e.getId(), BigDecimal.ZERO);
         }
 
         /** Pode ficar NEGATIVO, e isso e informacao: o limite estourou. */
