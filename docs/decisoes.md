@@ -460,6 +460,35 @@ A V17 saiu ontem e a V19 desmonta a parte dela que decidia **quem pode o quê**:
 
 Vale registrar sem rodeio: a V17 foi desenhada e implementada no mesmo dia, com decisões tomadas antes do código — e ainda assim o modelo de negócio só apareceu quando ele **usou** a tela. Nenhuma quantidade de desenho substitui isso.
 
+# 4o. O escopo segue o ambiente ativo (30/07/2026) — B-D111 e B-D112
+
+Ele foi usar o cartão dividido e trouxe duas coisas. A primeira parecia um defeito do compartilhamento e não era; a segunda derrubou uma preocupação minha com um argumento que eu não tinha feito.
+
+## O que ele viu, e o que o banco mostrou
+
+> *"Compartilhei um cartão e a outra pessoa teve acesso a todos os cartões."*
+
+Fui olhar os dados dele. `cartao_emitido_ambiente` tinha **exatamente uma linha** — o compartilhamento por plástico gravou o que devia. Simulando a sessão dela com o RLS ligado, ela enxergava os três. A causa estava em outra tabela:
+
+```
+Luciana Akemi | Financas de Abner | dono = false
+```
+
+Ela é **membro do ambiente dele** (V15), e por B-D76 quem entra no ambiente vê tudo que é dinheiro. Não é defeito: é a decisão dele, na frase dele — *"dar acesso ao ambiente inteiro é a mesma coisa que dar minha senha"*. Ele escolheu manter.
+
+**Mas havia um defeito de verdade junto**, e é o que B-D111 corrige.
+
+| # | Decisão | Motivo |
+|---|---|---|
+| B-D111 | **O escopo do que se vê segue o AMBIENTE ATIVO, e não a soma dos acessos da pessoa** | A RLS é por **usuário** (R7), então quem tem os dois acessos — membro do ambiente dele **e** dona de um plástico — via os três plásticos **inclusive dentro do ambiente dela**, onde só o dividido deveria estar. Não vaza informação nova (ela alcança tudo trocando de ambiente), mas a tela **mente sobre o que foi dividido**, e é ela que a pessoa usa para entender o que deu. São duas perguntas diferentes, e confundi-las foi o defeito: *"esta linha aparece nesta tela?"* é do ambiente aberto; *"posso ler este texto?"* continua sendo da pessoa — por isso `meu` segue por usuário, já que o texto de um lançamento meu é meu em qualquer ambiente meu |
+| B-D112 | **O banco do cartão dividido tem NOME para quem recebeu** | Eu tinha escondido atrás de *"(banco de quem dividiu o cartão)"*, tratando como privacidade. Ele derrubou com o que eu não tinha observado: **o nome do cartão já entrega o banco** — *"ultravioleta é Nubank, samsung é Itaú, porto é Porto Seguro"* — e ele foi direto ao ponto: *"compartilhar não tem premissa de privacidade"*. Esconder era proteção que não protegia nada e ainda deixava a tela dela incoerente. Só o **nome** atravessa: a conta continua sendo dele, e `exigirContaNoAmbiente` continua recusando qualquer lançamento que a aponte |
+
+## A consequência na tela, que era o pedido original
+
+No seletor de conta dela entra **"Nubank de Abner"** — com o dono no rótulo, porque ela pode ter um Nubank também. Escolhendo esse banco, o combo de "como foi pago" mostra **só os plásticos daquele banco que ele dividiu**: nada de débito, nada de pix, porque a conta não é dela.
+
+Antes disso o cartão dividido aparecia embaixo de **todas** as contas dela — escolher "C6 dela" e ver "UltraVioleta de Abner" era exatamente o lixo que ele apontou, e uma incoerência que eu tinha criado.
+
 # 5. Revisões registradas (R1–R6, sessão de requisitos)
 
 Decisões que substituíram decisões anteriores durante o próprio processo. O motivo da mudança é tão importante quanto a decisão final.
@@ -512,5 +541,6 @@ Decisões que substituíram decisões anteriores durante o próprio processo. O 
 | V15 | **Compartilhamento de ambiente** (§4j, B-D74 a B-D84): `usuario_ambiente.dono` com índice parcial de um dono por ambiente; `app_ambientes_proprios`, `app_contas_proprias`, `app_membros_dos_meus_ambientes`, `app_usuario_por_email`; políticas de `usuario_ambiente`, `conta_ambiente`, `ambiente` e `usuario` divididas por verbo; auditoria da porta. Verificada por `CompartilhamentoApiTest` (16) | ✔ |
 | V16 | **Compartilhamento de conta** (§4k, B-D85 a B-D97): `conta_ambiente.origem` e `encerrado_em` com retroalimentação e índice parcial de uma origem por conta; `conta_convite`; `app_contas_nao_emprestadas`; as funções que ATRAVESSAM ambientes (`app_saldo_da_conta`, `app_extrato_da_conta`) — a quarta exceção de B-D19 e a primeira em leitura; aceite, revogação e as duas funções do convite. Fecha os dois Achados da seção. Verificada por `CompartilhamentoContaApiTest` (21) | ✔ |
 | V17 | **Cartão compartilhado** (§4l, B-D98 a B-D103): `app_total_da_fatura` e `app_extrato_da_fatura`; políticas de `cartao`, `cartao_emitido` e `fatura` divididas por verbo, com **fechar dos dois e reabrir do dono** separados pelo valor de `fechada_em` na linha nova (B-D100). Nenhuma tabela nova — compartilhar cartão é compartilhar a conta do contrato (B-D98). Verificada por `CartaoCompartilhadoApiTest` (8) | ✔ |
+| V20 | **Escopo por ambiente e o banco com nome** (§4o, B-D111/B-D112): `app_nome_do_banco_do_cartao`; `app_extrato_da_fatura` ganha o ambiente por parâmetro e recorta por ele. Os plásticos e os números da fatura passam a seguir o ambiente ativo. Verificada por `CartaoCompartilhadoApiTest` (14) | ✔ |
 | V19 | **O PLASTICO como unidade** (§4n, B-D106 a B-D110): `cartao_emitido_ambiente`; `conta_convite.cartao_emitido_id`; `app_emitidos_liberados`, aceite, revogação e lista do plástico; `app_total_do_plastico`; `pol_cartao_emitido_leitura` com as duas origens de visibilidade; `app_extrato_da_fatura` recortando por plástico; `pol_fatura_fechar` removida (B-D108). Revoga B-D98/B-D99/B-D100 da V17. Verificada por `CartaoCompartilhadoApiTest` (12), reescrito | ✔ |
 | V18 | **Telegram no cadastro** (B-D105): `auth_cadastrar_usuario` ganha o quarto parâmetro `telegram_id`, com `DROP` + `CREATE` para não deixar duas portas de cadastro. A coluna e o índice parcial existem desde a V1. Verificada por `AutenticacaoFluxoTest` | ✔ |

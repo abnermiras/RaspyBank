@@ -30,8 +30,10 @@ import java.time.OffsetDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -116,6 +118,13 @@ public class CartaoServico {
         // Duas consultas para a tela inteira, e nao duas por cartao.
         Map<UUID, SaldoDaConta> saldos = saldosQueAtravessam(ambienteId);
 
+        // A RLS libera os plasticos por USUARIO (R7): quem e membro do ambiente
+        // de outra pessoa enxerga todos os plasticos dos cartoes de la, em
+        // qualquer ambiente que abra. Isso e B-D76 e fica — mas a LISTA desta
+        // tela e do ambiente ATIVO (B-D111), senao ela ve, no ambiente dela,
+        // plasticos que ninguem dividiu com ela.
+        Set<UUID> liberadosAqui = emitidosLiberadosNo(ambienteId);
+
         Map<UUID, List<CartaoEmitido>> porCartao = new HashMap<>();
         for (CartaoEmitido e : emitidos.findByCartaoIdIn(ids)) {
             porCartao.computeIfAbsent(e.getCartaoId(), k -> new ArrayList<>()).add(e);
@@ -146,9 +155,10 @@ public class CartaoServico {
 
                 return new Resumo(
                     c,
-                    nomeDoBanco(nomesDeBanco, c.getContaBancoId(), origem),
+                    nomeDoBanco(nomesDeBanco, c, origem),
                     saldos.getOrDefault(c.getContaId(), SaldoDaConta.zeradoPara(c.getContaId())),
-                    porCartao.getOrDefault(c.getContaId(), List.of()),
+                    plasticosDoAmbiente(porCartao.getOrDefault(c.getContaId(), List.of()),
+                                        origem, liberadosAqui),
                     origem,
                     podeCompartilhar,
                     podeCompartilhar && temPlasticoDividido(c.getContaId()),
@@ -170,11 +180,12 @@ public class CartaoServico {
             .orElse(true);
         boolean podeCompartilhar = origem && souDonoDoAmbiente(ambienteId);
 
-        String banco = nomeDoBanco(
-            nomesDasContas(List.of(c.getContaBancoId())), c.getContaBancoId(), origem);
+        String banco = nomeDoBanco(nomesDasContas(List.of(c.getContaBancoId())), c, origem);
 
         return new Resumo(
-            c, banco, saldo, emitidos.findByCartaoIdOrderByCriadoEm(cartaoId),
+            c, banco, saldo,
+            plasticosDoAmbiente(emitidos.findByCartaoIdOrderByCriadoEm(cartaoId),
+                                origem, emitidosLiberadosNo(ambienteId)),
             origem,
             podeCompartilhar,
             podeCompartilhar && temPlasticoDividido(cartaoId),
@@ -563,19 +574,61 @@ public class CartaoServico {
     }
 
     /**
-     * O nome do banco do contrato — e a frase honesta quando ele nao e visivel.
+     * Os plasticos que este AMBIENTE alcanca (B-D111).
      *
-     * <p>No cartao dividido, o banco e uma conta de outra pessoa: quem recebeu o
-     * cartao nao a enxerga, e {@code nomesDasContas} volta vazio. O texto antigo
-     * — "(conta removida)" — <b>mentiria</b>, porque a conta existe e esta bem.
-     * A frase de agora e verdadeira nos dois casos.</p>
+     * <p>No ambiente onde o cartao nasceu, todos. Nos outros, so os que foram
+     * dividos <b>para aquele ambiente</b> — e nao os que a pessoa alcanca por
+     * outros caminhos.</p>
      */
-    private static String nomeDoBanco(Map<UUID, String> nomes, UUID bancoId, boolean origem) {
-        String nome = nomes.get(bancoId);
+    private static List<CartaoEmitido> plasticosDoAmbiente(List<CartaoEmitido> todos,
+                                                           boolean origem,
+                                                           Set<UUID> liberadosAqui) {
+        if (origem) {
+            return todos;
+        }
+        return todos.stream().filter(e -> liberadosAqui.contains(e.getId())).toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<UUID> emitidosLiberadosNo(UUID ambienteId) {
+        List<UUID> ids = em.createNativeQuery("""
+                SELECT cea.cartao_emitido_id
+                  FROM cartao_emitido_ambiente cea
+                 WHERE cea.ambiente_id = :ambiente
+                   AND cea.encerrado_em IS NULL
+                """)
+            .setParameter("ambiente", ambienteId)
+            .getResultList();
+
+        return new HashSet<>(ids);
+    }
+
+    /**
+     * O nome do banco do contrato — inclusive no cartao que voce recebeu.
+     *
+     * <p>Ate a V19 o cartao dividido respondia "(banco de quem dividiu o cartao)":
+     * a conta do banco e de quem abriu o contrato, e quem recebeu nao a enxerga.
+     * Ele derrubou a preocupacao com uma observacao que eu nao tinha feito — <i>"o
+     * proprio cartao ja fala de onde e: ultravioleta e Nubank, samsung e
+     * Itau"</i> — e sem o nome a tela dela ficava incoerente (B-D112).</p>
+     *
+     * <p>So o NOME atravessa. A conta continua sendo dele, e
+     * {@code exigirContaNoAmbiente} continua recusando qualquer lancamento que a
+     * aponte.</p>
+     */
+    private String nomeDoBanco(Map<UUID, String> nomes, Cartao cartao, boolean origem) {
+        String nome = nomes.get(cartao.getContaBancoId());
         if (nome != null) {
             return nome;
         }
-        return origem ? "(conta removida)" : "(banco de quem dividiu o cartao)";
+        if (origem) {
+            // Visivel aqui e sem nome: a conta foi mesmo removida.
+            return "(conta removida)";
+        }
+        return (String) em.createNativeQuery(
+                "SELECT app_nome_do_banco_do_cartao(:cartao)")
+            .setParameter("cartao", cartao.getContaId())
+            .getSingleResult();
     }
 
     private boolean souDonoDoAmbiente(UUID ambienteId) {

@@ -130,7 +130,11 @@ class MigracoesTest extends IntegracaoTest {
         "app_compartilhamentos_do_plastico",
         "app_emitidos_liberados",
         "app_revogar_plastico_compartilhado",
-        "app_total_do_plastico");
+        "app_total_do_plastico",
+        // V20. O nome do banco para quem recebeu um plastico (B-D112) — a conta
+        // do banco e de quem abriu o cartao, e ela nao a enxerga. Devolve SO o
+        // nome: nao da saldo, nem formas, nem o direito de lancar nela.
+        "app_nome_do_banco_do_cartao");
 
     private static final List<String> TABELAS_COM_RLS = List.of(
         // Fundacao (V3)

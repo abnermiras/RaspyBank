@@ -105,7 +105,7 @@ public class FaturaServico {
         List<Fatura> lista = faturas.doAno(cartaoId,
             LocalDate.of(ano, 1, 1), LocalDate.of(ano, 12, 1));
 
-        return comNumeros(lista, cartaoId, hoje);
+        return comNumeros(lista, cartaoId, ambienteId, hoje);
     }
 
     @Transactional
@@ -116,7 +116,7 @@ public class FaturaServico {
         exigirCartao(ambienteId, f.getCartaoId());
         fecharVencidasSePuder(ambienteId, f.getCartaoId(), hoje);
 
-        return comNumeros(List.of(f), f.getCartaoId(), hoje).get(0);
+        return comNumeros(List.of(f), f.getCartaoId(), ambienteId, hoje).get(0);
     }
 
     /**
@@ -144,9 +144,10 @@ public class FaturaServico {
                        subcategoria_id, subcategoria_nome, quem_nome,
                        cartao_emitido_id, titular, tipo_emitido, final_do_cartao,
                        parcela_numero, parcela_total
-                  FROM app_extrato_da_fatura(:fatura)
+                  FROM app_extrato_da_fatura(:fatura, :ambiente)
                 """)
             .setParameter("fatura", faturaId)
+            .setParameter("ambiente", ambienteId)
             .getResultList();
 
         return linhas.stream()
@@ -363,7 +364,8 @@ public class FaturaServico {
      * propria tabela, que a RLS ja filtra.</p>
      */
     @SuppressWarnings("unchecked")
-    private List<Item> comNumeros(List<Fatura> lista, UUID cartaoId, LocalDate hoje) {
+    private List<Item> comNumeros(List<Fatura> lista, UUID cartaoId, UUID ambienteId,
+                                  LocalDate hoje) {
         if (lista.isEmpty()) {
             return List.of();
         }
@@ -378,10 +380,13 @@ public class FaturaServico {
         // dos outros nove plasticos num numero so. E o pagamento nem entra na
         // conta dela: por B-D107 ela nao paga, e pagamento e movimento do
         // contrato.
-        boolean doDono = (Boolean) em.createNativeQuery(
-                "SELECT :cartao IN (SELECT app_contas_nao_emprestadas())")
-            .setParameter("cartao", cartaoId)
-            .getSingleResult();
+        // Por AMBIENTE, e nao por usuario (B-D111): quem tem os dois acessos —
+        // membro do ambiente dele E dona de um plastico — via o total do contrato
+        // tambem dentro do ambiente dela, onde so a parte dela deveria estar.
+        boolean doDono = vinculos.findById(new ContaAmbiente.Chave(cartaoId, ambienteId))
+            .filter(ContaAmbiente::estaAtivo)
+            .map(ContaAmbiente::isOrigem)
+            .orElse(false);
 
         List<Object[]> linhas = doDono
             ? em.createNativeQuery("""
@@ -395,12 +400,16 @@ public class FaturaServico {
             : em.createNativeQuery("""
                     SELECT f.id, coalesce(SUM(t.previsto), 0), 0::numeric
                       FROM fatura f
-                      JOIN cartao_emitido ce ON ce.cartao_id = f.cartao_id
+                      JOIN cartao_emitido_ambiente cea ON cea.ambiente_id = :ambiente
+                                                      AND cea.encerrado_em IS NULL
+                      JOIN cartao_emitido ce ON ce.id = cea.cartao_emitido_id
+                                            AND ce.cartao_id = f.cartao_id
                       CROSS JOIN LATERAL app_total_do_plastico(ce.id, f.id) t
                      WHERE f.cartao_id = :cartao
                      GROUP BY f.id
                     """)
                 .setParameter("cartao", cartaoId)
+                .setParameter("ambiente", ambienteId)
                 .getResultList();
 
         Map<UUID, TotalDaFatura> totais = new HashMap<>();

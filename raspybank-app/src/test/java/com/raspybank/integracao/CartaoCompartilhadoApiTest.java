@@ -67,6 +67,7 @@ class CartaoCompartilhadoApiTest extends IntegracaoTest {
     private static String emailDela;
     private static String ambienteDaConvidada;
 
+    private static String ambienteDoDono;
     private static String bancoDoDono;
     private static String bancoDela;
 
@@ -368,6 +369,83 @@ class CartaoCompartilhadoApiTest extends IntegracaoTest {
     }
 
     // =========================================================================
+    // O caso que ELE achou usando (B-D111)
+    // =========================================================================
+
+    @Test
+    @Order(13)
+    @DisplayName("Com os DOIS acessos, o ambiente dela mostra so o plastico dividido (B-D111)")
+    void oEscopoSegueOAmbienteAtivo() {
+        // Ele divide o virtual de novo — o teste 11 revogou.
+        assertEquals(HttpStatus.CREATED, post(tokenDono,
+            "/api/cartoes/" + cartao + "/emitidos/" + virtualCompartilhado + "/compartilhamentos",
+            Map.of("email", emailDela)).getStatusCode());
+
+        String convite = (String) ((List<Map<String, Object>>)
+            get(tokenConvidada, "/api/convites").getBody().get("convites")).get(0).get("id");
+
+        assertEquals(HttpStatus.CREATED, post(tokenConvidada,
+            "/api/convites/" + convite + "/aceitar",
+            Map.of("ambienteId", ambienteDaConvidada)).getStatusCode());
+
+        // E AGORA o que ele fez sem perceber: ela tambem entra no ambiente dele
+        // (V15). Por B-D76 isso da acesso a tudo que e dinheiro la dentro — e foi
+        // isso, e nao o compartilhamento de plastico, que fez ela ver os tres.
+        assertEquals(HttpStatus.CREATED, post(tokenDono,
+            "/api/ambientes/" + ambienteDoDono + "/acessos",
+            Map.of("email", emailDela)).getStatusCode());
+
+        // No ambiente DELA: um plastico. O acesso ao ambiente dele nao vaza para
+        // ca, e era exatamente o defeito.
+        List<Map<String, Object>> noAmbienteDela =
+            (List<Map<String, Object>>) cartaoNaListaDe(tokenConvidada).get("emitidos");
+
+        assertEquals(1, noAmbienteDela.size(),
+            "No ambiente dela apareceram " + noAmbienteDela.size() + " plasticos."
+                + " O escopo tem de seguir o ambiente ativo, nao a soma dos acessos");
+        assertEquals(virtualCompartilhado, noAmbienteDela.get(0).get("id"));
+
+        // No ambiente DELE: os tres, porque la ela e membro e B-D76 vale inteiro.
+        String tokenNoAmbienteDele = (String) post(tokenConvidada,
+            "/api/sessao/ambiente", Map.of("ambienteId", ambienteDoDono))
+            .getBody().get("tokenAcesso");
+
+        Map<String, Object> cartaoLaDentro = ((List<Map<String, Object>>)
+            get(tokenNoAmbienteDele, "/api/cartoes").getBody().get("cartoes")).stream()
+            .filter(c -> cartao.equals(c.get("id")))
+            .findFirst().orElseThrow();
+
+        // Os DOIS deste cenario (o fisico dele e o virtual dividido). Dentro do
+        // ambiente dele ela ve tudo, e isso e B-D76 inteiro — a senha dele.
+        assertEquals(2, ((List<?>) cartaoLaDentro.get("emitidos")).size(),
+            "Dentro do ambiente dele ela deveria ver os dois — e a senha dele (B-D76)");
+
+        // E o extrato da fatura segue a mesma regra: recortado no ambiente dela,
+        // inteiro no dele.
+        assertEquals(2, extratoDaFatura(tokenConvidada).size(),
+            "O extrato no ambiente dela trouxe linhas de plastico que nao e dela");
+
+        // Cinco: as tres compras MAIS as duas pernas do pagamento, que tambem
+        // carregam a fatura (B-D59). As pernas nao tem plastico, e e por isso que
+        // o extrato dela nao as ve — pagamento e movimento do contrato, e por
+        // B-D107 ela nao paga.
+        ResponseEntity<Map> inteiro = get(tokenNoAmbienteDele,
+            "/api/faturas/" + faturaAtual + "/lancamentos");
+        assertEquals(5, ((List<?>) inteiro.getBody().get("lancamentos")).size(),
+            "No ambiente dele o extrato deveria vir inteiro");
+    }
+
+    @Test
+    @Order(14)
+    @DisplayName("O banco do cartao dividido tem NOME para ela (B-D112)")
+    void oBancoTemNome() {
+        assertEquals("Nubank dele", cartaoNaListaDe(tokenConvidada).get("banco") == null
+            ? null
+            : ((Map<String, Object>) cartaoNaListaDe(tokenConvidada).get("banco")).get("nome"),
+            "Sem o nome do banco, o seletor de conta dela nao tem como agrupar o cartao");
+    }
+
+    // =========================================================================
     // Cenario
     // =========================================================================
 
@@ -382,6 +460,8 @@ class CartaoCompartilhadoApiTest extends IntegracaoTest {
 
         tokenDono      = cadastrarEEntrar("Abner", emailDono);
         tokenConvidada = cadastrarEEntrar("Luciana", emailDela);
+
+        ambienteDoDono = String.valueOf(get(tokenDono, "/api/perfil").getBody().get("ambienteAtual"));
 
         Map perfilDela = get(tokenConvidada, "/api/perfil").getBody();
         convidadaId         = UUID.fromString(String.valueOf(perfilDela.get("usuarioId")));

@@ -271,25 +271,68 @@ export function opcoesDePagamento(conta, formasConhecidas, cartoesDoAmbiente, se
           .flatMap((c) => plasticos(c, ''))
       : []
 
-  /**
-   * O PLÁSTICO dividido com você (B-D106) não fica embaixo de nenhuma conta sua.
-   *
-   * O banco do contrato é uma conta de outra pessoa — você não a enxerga, então o
-   * agrupamento "banco → cartões" de B-D61 não tem onde se apoiar. Ele aparece
-   * para qualquer conta sua, marcado de quem é: o servidor não confere o banco
-   * neste caso, justamente porque a pergunta não tem resposta do seu lado.
-   *
-   * A lista de `emitidos` de um cartão emprestado já vem com SÓ os plásticos que
-   * você recebeu — o recorte é da política, não daqui.
-   */
-  const emprestados =
-    sentido === 'SAIDA'
-      ? cartoesDoAmbiente
-          .filter((c) => c.origem === false && !c.encerradoEm)
-          .flatMap((c) => plasticos(c, ` (de ${c.recebidoDe})`))
-      : []
+  return [...formas, ...cartoes]
+}
 
-  return [...formas, ...cartoes, ...emprestados]
+/**
+ * O banco de OUTRA PESSOA, que aparece no seu seletor de conta só para você
+ * alcançar o cartão que ela dividiu (B-D112).
+ *
+ * Não é uma conta sua: você não tem saldo nem forma de pagamento nela, e o
+ * servidor recusa qualquer lançamento que a aponte. Ela existe na tela porque o
+ * agrupamento "banco → cartões" de B-D61 é como se pensa em cartão — palavras
+ * dele: *"primeiro eu penso de qual banco, depois no cartão"*.
+ *
+ * O nome traz o dono ("Nubank de Abner") porque você pode ter um Nubank também.
+ *
+ * Antes disso, o cartão dividido aparecia embaixo de TODAS as suas contas, e era
+ * lixo: escolher "C6 dela" e ver "UltraVioleta de Abner" não quer dizer nada.
+ */
+export function bancosEmprestados(cartoesDoAmbiente) {
+  const porBanco = new Map()
+
+  for (const c of cartoesDoAmbiente) {
+    if (c.origem !== false || c.encerradoEm || !c.banco?.id) continue
+
+    const chave = `${c.banco.id}:${c.recebidoDe}`
+    if (!porBanco.has(chave)) {
+      porBanco.set(chave, {
+        id: chave,
+        nome: `${c.banco.nome} de ${c.recebidoDe}`,
+        emprestada: true,
+        cartoes: [],
+      })
+    }
+    porBanco.get(chave).cartoes.push(c)
+  }
+
+  return [...porBanco.values()]
+}
+
+/**
+ * As opções de "como foi pago" de um banco emprestado: SÓ os plásticos que
+ * aquela pessoa dividiu com você, daquele banco.
+ *
+ * Nada de débito, pix ou boleto — a conta não é sua, e o dinheiro daquele banco
+ * não se move por você. Cartão de crédito só serve para SAÍDA.
+ */
+export function opcoesDoBancoEmprestado(banco, sentido) {
+  if (!banco?.emprestada || sentido !== 'SAIDA') return []
+
+  return banco.cartoes.flatMap((c) =>
+    (c.emitidos ?? [])
+      .filter((e) => !e.canceladoEm)
+      .map((e) => ({
+        chave: `cartao:${e.id}`,
+        rotulo:
+          `${c.nome} · ${e.tipo === 'FISICO' ? 'físico' : 'virtual'} ····${e.finalDoCartao}`,
+        forma: null,
+        cartao: e.id,
+        // A conta que o lançamento vai gravar é a do CARTÃO, e não a do banco:
+        // o banco é dele, e `exigirContaNoAmbiente` recusaria.
+        contaDoCartao: c.id,
+      })),
+  )
 }
 
 // ------------------------------------------------------------------ faturas

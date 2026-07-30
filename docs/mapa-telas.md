@@ -585,3 +585,23 @@ Na descrição dele, o combo de meio de pagamento dela mostraria o **banco Nuban
 O motivo é estrutural: o banco do contrato é uma conta que ela **não enxerga**, e expor o nome dele exigiria mais uma função `SECURITY DEFINER`. Fica registrado como pergunta aberta, porque a resposta é dele: mostrar o nome significa ela saber em qual banco ele tem conta.
 
 **Verificado em 30/07/2026:** 227 testes verdes, sendo 12 no `CartaoCompartilhadoApiTest` reescrito, e `make web-test` verde.
+
+## 18. O banco de outra pessoa no seletor dela (30/07/2026, V20)
+
+Duas correções vindas do uso, e a primeira parecia um defeito do compartilhamento sem ser. Decisões em `decisoes.md` §4o.
+
+### O escopo passou a seguir o ambiente ativo
+
+Ele dividiu um plástico e viu a outra pessoa com todos. Os dados mostraram o compartilhamento correto — uma linha em `cartao_emitido_ambiente` — e a causa em outro lugar: ela também é **membro do ambiente dele**, e por B-D76 isso dá acesso a tudo lá dentro. Ficou como está, porque é a decisão dele.
+
+O defeito que veio junto era da tela: como a RLS é por **usuário**, os plásticos apareciam também **dentro do ambiente dela**. Agora a lista de plásticos, os números da fatura e o extrato seguem o **ambiente ativo** — no dele, tudo; no dela, só o dividido.
+
+### O banco de quem dividiu entra no seletor de conta
+
+No formulário de lançamento dela aparece **"Nubank de Abner"**, junto das contas dela. Não é uma conta: escolhendo esse banco, o combo de "como foi pago" mostra **só os plásticos daquele banco que ele dividiu** — sem débito, sem pix, porque o dinheiro daquele banco não se move por ela. E o lançamento grava a conta do **cartão**, não a do banco.
+
+O rótulo traz o dono porque ela pode ter um Nubank também.
+
+Antes disso o cartão dividido aparecia embaixo de **todas** as contas dela, o que era incoerente — escolher "C6 dela" e ver "UltraVioleta de Abner" não quer dizer nada. Foi ele quem apontou.
+
+**Verificado em 30/07/2026:** 229 testes verdes, com dois casos novos guardando o caso que ele achou — a pessoa com os **dois** acessos vendo um plástico no ambiente dela e todos no dele — e `make web-test` verde.

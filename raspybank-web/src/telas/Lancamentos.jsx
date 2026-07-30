@@ -4,7 +4,9 @@ import {
   categorias as apiCategorias,
   contas as apiContas,
   lancamentos as apiLancamentos,
+  bancosEmprestados,
   opcoesDePagamento,
+  opcoesDoBancoEmprestado,
   transferencias as apiTransferencias,
   cartoes as apiCartoes,
 } from '../api/recursos.js'
@@ -405,7 +407,13 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
   // vez, e se sai em partes são lançamentos diferentes.
   const ehCartao = escolha.cartao !== null
 
-  const conta = apoio.contas.find((c) => c.id === contaId)
+  // O seletor de conta soma as contas dela e os BANCOS EMPRESTADOS — o banco de
+  // quem dividiu um cartao com ela (B-D112). Ele nao e uma conta: existe para
+  // alcancar o cartao, e escolher um dele sem cartao e impossivel, porque o combo
+  // de pagamento so oferece plasticos.
+  const contasDoSeletor = [...apoio.contas, ...bancosEmprestados(apoio.cartoes ?? [])]
+
+  const conta = contasDoSeletor.find((c) => c.id === contaId)
 
   // Espelha resolverFormaDePagamento do servidor. É a única duplicação de regra
   // desta tela, e ela existe para MOSTRAR, não para decidir: o que for gravado
@@ -416,7 +424,9 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
   // O cruzamento: as formas que a conta aceita E que servem a este sentido.
   // Sem o segundo filtro, a conta corrente ofereceria "boleto" ao lançar o
   // salário — e o servidor recusaria, com razão.
-  const opcoes = opcoesDePagamento(conta, formasConhecidas, apoio.cartoes ?? [], sentido)
+  const opcoes = conta?.emprestada
+    ? opcoesDoBancoEmprestado(conta, sentido)
+    : opcoesDePagamento(conta, formasConhecidas, apoio.cartoes ?? [], sentido)
 
   // Tem cartão naquele banco, mas nenhum plástico emitido — o combo ficaria sem
   // a opção e sem motivo aparente.
@@ -463,7 +473,9 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
         e.preventDefault()
         const d = new FormData(e.target)
         const corpo = {
-          contaId,
+          // No banco emprestado o lançamento grava a conta do CARTÃO: o banco é
+          // de quem dividiu, e o servidor recusaria um lançamento que o aponte.
+          contaId: opcoes.find((o) => o.chave === pagamento)?.contaDoCartao ?? contaId,
           categoriaId,
           subcategoriaId: subcategoriaId || null,
           valor: d.get('valor').trim(),
@@ -493,7 +505,7 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
             onChange={(e) => trocarConta(e.target.value)}
           >
             <option value="" disabled>Escolha…</option>
-            {apoio.contas.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            {contasDoSeletor.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
         </label>
 

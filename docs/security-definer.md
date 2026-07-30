@@ -1,6 +1,6 @@
 # RaspyBank — Inventário de Funções SECURITY DEFINER
 
-**Versão:** 1.4
+**Versão:** 1.5
 **Data:** 30 de julho de 2026
 **Regra deste documento:** toda função `SECURITY DEFINER` é um furo **controlado** na política de Row Level Security. Cada uma existe por um motivo específico, registrado aqui. Criar uma nova exige adicionar a entrada correspondente no mesmo commit — função sem entrada neste inventário é dívida.
 
@@ -172,6 +172,16 @@ O único número de fatura que quem recebeu um plástico vê (B-D110) — o do c
 - **`app_extrato_da_fatura`** passou a **recortar por plástico**, e o filtro deriva da concessão em vez de ser parâmetro: o dono vê tudo (as mini faturas), quem recebeu vê as linhas dos plásticos que recebeu.
 - **`app_convites_de_conta_pendentes`** passou a dizer se o convite é de conta ou de plástico. Foi `DROP` + `CREATE`: acrescentar colunas a um `RETURNS TABLE` muda o tipo de retorno, e o Postgres recusa a substituição — a primeira versão da migração falhou exatamente aí.
 
+## Funções da V20
+
+### `app_nome_do_banco_do_cartao(cartao_id)` — V20
+Devolve **só o nome** do banco do contrato, para quem recebeu um plástico (B-D112). A conta do banco é de quem abriu o cartão e não é visível para quem recebeu — daí o impasse.
+
+O escopo mínimo é o ponto: não devolve saldo, não devolve formas de pagamento, e não cria direito nenhum sobre a conta. `exigirContaNoAmbiente` continua recusando qualquer lançamento que a aponte; o nome existe para a tela poder agrupar "banco → cartões", que é como se pensa em cartão (B-D61).
+
+### O que a V20 mudou
+- **`app_extrato_da_fatura`** ganhou o **ambiente por parâmetro** e passou a recortar por ele (B-D111). O ambiente não é palpite da tela: a função confere que ele é de quem chama antes de usar, senão o parâmetro viraria um jeito de pedir o recorte de um ambiente alheio. Foi `DROP` + `CREATE` — a lição da V19 sobre `RETURNS TABLE` já estava aprendida.
+
 ## Funções de gatilho (V10)
 
 Caso à parte, pela razão explicada no critério: o registro que elas gravam precisa entrar mesmo quando o autor não tem identidade válida.
@@ -220,3 +230,4 @@ Grava no `outbox` na mesma transação do lançamento (F28). DEFINER pela mesma 
 | `app_revogar_plastico_compartilhado` | V19 | Com sessão | Revoga, e leva o cartão se não sobrar plástico |
 | `app_compartilhamentos_do_plastico` | V19 | Com sessão | Com quem dividi este plástico |
 | `app_total_do_plastico` | V19 | Com sessão | O único número de fatura de quem recebeu |
+| `app_nome_do_banco_do_cartao` | V20 | Com sessão | Só o nome do banco, para agrupar na tela |
