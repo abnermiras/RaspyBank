@@ -235,7 +235,7 @@ public class CartaoControlador {
         /** Dinheiro e string (F1): numero em JSON viraria double no JavaScript. */
         @NotNull(message = "limite e obrigatorio")
         @Pattern(regexp = "\\d{1,13}(\\.\\d{1,2})?",
-                 message = "limite deve ser positivo, com ate duas casas, como \"10000.00\"")
+                 message = "limite deve ser positivo e usar ponto decimal, sem separador de milhar, como \"10000.00\"")
         String limite,
 
         @NotNull(message = "diaVencimento e obrigatorio")
@@ -274,7 +274,7 @@ public class CartaoControlador {
 
         @NotNull(message = "limite e obrigatorio")
         @Pattern(regexp = "\\d{1,13}(\\.\\d{1,2})?",
-                 message = "limite deve ser positivo, com ate duas casas")
+                 message = "limite deve ser positivo e usar ponto decimal, sem separador de milhar")
         String limite
     ) {}
 
@@ -302,7 +302,7 @@ public class CartaoControlador {
         String finalDoCartao,
 
         @Pattern(regexp = "\\d{1,13}(\\.\\d{1,2})?",
-                 message = "limiteProprio deve ser positivo, com ate duas casas")
+                 message = "limiteProprio deve ser positivo e usar ponto decimal, sem separador de milhar")
         String limiteProprio
     ) {
         BigDecimal limiteProprioComoDecimal() {

@@ -277,7 +277,7 @@ public class ContaControlador {
          * vermelho comecam devendo.
          */
         @Pattern(regexp = "-?\\d{1,13}(\\.\\d{1,2})?",
-                 message = "saldoInicial deve ser decimal com ate duas casas, como \"3000.00\"")
+                 message = "saldoInicial deve usar ponto decimal, sem separador de milhar, como \"3000.00\" ou \"-3000.00\"")
         String saldoInicial,
 
         /**

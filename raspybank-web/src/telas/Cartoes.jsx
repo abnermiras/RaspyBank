@@ -8,7 +8,7 @@ import {
 import Aviso from '../componentes/Aviso.jsx'
 import PainelDeCompartilhamento from '../componentes/PainelDeCompartilhamento.jsx'
 import { useCarregar } from '../ganchos/useCarregar.js'
-import { data, dinheiro } from '../util/formato.js'
+import { data, dinheiro, paraCampo, paraDecimal } from '../util/formato.js'
 import {
   carregarFormasDePagamento,
   formasDaContaNoSentido,
@@ -768,7 +768,7 @@ function FormularioDeCartao({ contas, ocupado, aoGravar, aoCancelar }) {
         aoGravar({
           contaBancoId,
           nome: d.get('nome').trim(),
-          limite: d.get('limite').trim(),
+          limite: paraDecimal(d.get('limite')),
           finalDoCartao: d.get('finalDoCartao').trim(),
           diaVencimento: Number(d.get('diaVencimento')),
           diasParaFechamento: Number(d.get('diasParaFechamento')),
@@ -793,7 +793,7 @@ function FormularioDeCartao({ contas, ocupado, aoGravar, aoCancelar }) {
 
         <label>
           Limite
-          <input name="limite" inputMode="decimal" required placeholder="10000.00" />
+          <input name="limite" inputMode="decimal" required placeholder="10.000,00" />
         </label>
 
         <label>
@@ -870,7 +870,7 @@ function FormularioDePagamento({ fatura, cartao, contas, formas, aoGravar, aoCan
         const d = new FormData(e.target)
         aoGravar({
           contaOrigemId,
-          valor: d.get('valor').trim(),
+          valor: paraDecimal(d.get('valor')),
           dataCaixa: d.get('dataCaixa'),
           formaPagamento: formaPagamento || null,
         })
@@ -899,7 +899,7 @@ function FormularioDePagamento({ fatura, cartao, contas, formas, aoGravar, aoCan
           Valor
           <input
             name="valor" inputMode="decimal" required
-            defaultValue={fatura.aPagar} placeholder="0,00"
+            defaultValue={paraCampo(fatura.aPagar)} placeholder="0,00"
           />
         </label>
 

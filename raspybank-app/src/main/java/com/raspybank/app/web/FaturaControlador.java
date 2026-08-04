@@ -153,7 +153,7 @@ public class FaturaControlador {
         /** Dinheiro e string (F1). Parcial e legitimo — ver B-D52. */
         @NotNull(message = "valor e obrigatorio")
         @Pattern(regexp = "\\d{1,13}(\\.\\d{1,2})?",
-                 message = "valor deve ser positivo, com ate duas casas, como \"2500.00\"")
+                 message = "valor deve ser positivo e usar ponto decimal, sem separador de milhar, como \"2500.00\"")
         String valor,
 
         @NotNull(message = "dataCaixa e obrigatoria")

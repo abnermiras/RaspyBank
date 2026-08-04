@@ -9,7 +9,7 @@ import Aviso from '../componentes/Aviso.jsx'
 import PainelDeCompartilhamento from '../componentes/PainelDeCompartilhamento.jsx'
 import { useAutenticacao } from '../contexto/Autenticacao.jsx'
 import { useCarregar } from '../ganchos/useCarregar.js'
-import { data, dinheiro, mesDe, mesPorExtenso } from '../util/formato.js'
+import { data, dinheiro, mesDe, mesPorExtenso, paraDecimal } from '../util/formato.js'
 import {
   carregarFormasDePagamento,
   formasDoSentido,
@@ -798,7 +798,7 @@ function FormularioDeConta({ aoCriar, ocupado, formasConhecidas }) {
       onSubmit={(e) => {
         e.preventDefault()
         const d = new FormData(e.target)
-        const saldoInicial = d.get('saldoInicial').trim()
+        const saldoInicial = paraDecimal(d.get('saldoInicial'))
         aoCriar({
           nome: d.get('nome').trim(),
           natureza: d.get('natureza'),

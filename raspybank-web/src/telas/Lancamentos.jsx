@@ -12,7 +12,7 @@ import {
 } from '../api/recursos.js'
 import Aviso from '../componentes/Aviso.jsx'
 import { useCarregar } from '../ganchos/useCarregar.js'
-import { data, dinheiro, hojeISO, mesDe, mesPorExtenso } from '../util/formato.js'
+import { data, dinheiro, hojeISO, mesDe, mesPorExtenso, paraCampo, paraDecimal } from '../util/formato.js'
 import {
   carregarFormasDePagamento,
   formasDaContaNoSentido,
@@ -478,7 +478,7 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
           contaId: opcoes.find((o) => o.chave === pagamento)?.contaDoCartao ?? contaId,
           categoriaId,
           subcategoriaId: subcategoriaId || null,
-          valor: d.get('valor').trim(),
+          valor: paraDecimal(d.get('valor')),
           dataCaixa,
           descricao: d.get('descricao').trim(),
           // Vazio significa coisas diferentes nos dois verbos, e é o servidor
@@ -544,7 +544,7 @@ function FormularioDeLancamento({ lancamento, apoio, categoriasLancaveis, formas
           Valor
           <input
             name="valor" inputMode="decimal" required
-            defaultValue={lancamento?.valor ?? ''} placeholder="0,00"
+            defaultValue={paraCampo(lancamento?.valor)} placeholder="0,00"
           />
         </label>
 
@@ -727,7 +727,7 @@ function FormularioDeTransferencia({ contas, ocupado, aoGravar, aoCancelar }) {
         aoGravar({
           contaOrigemId: origemId,
           contaDestinoId: destinoId,
-          valor: d.get('valor').trim(),
+          valor: paraDecimal(d.get('valor')),
           dataCaixa,
           descricao: d.get('descricao').trim(),
         })
