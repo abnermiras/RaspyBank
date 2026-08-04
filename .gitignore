@@ -99,3 +99,9 @@ temp/
 *.sql.gz
 *.dump
 pgdata/
+
+# A pasta inteira, e não só as extensões acima. O alvo "db-dump" grava aqui, e
+# a lista de extensões protege por coincidência: bastaria um `pg_dump` sem
+# `| gzip`, ou com `-Fc` e outro nome, para um arquivo com dado financeiro real
+# entrar num repositório PÚBLICO. Ignorar o diretório fecha a classe inteira.
+backups/

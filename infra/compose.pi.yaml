@@ -5,16 +5,88 @@
 #
 #   docker compose -f infra/compose.yaml -f infra/compose.pi.yaml up -d
 #
-# Filosofia deste arquivo: restrição e durabilidade. Nada de porta exposta,
-# nada de log verboso, nada de ferramenta gráfica. Memória limitada e dados
-# no SSD.
+# Filosofia deste arquivo: restrição e durabilidade. Nada de log verboso, nada
+# de ferramenta gráfica, memória limitada, dados fora do volume descartável.
 #
-# ATENÇÃO: este arquivo ainda não foi exercitado — o Pi entra na Fase 9.
-# Ele existe agora para que as diferenças entre ambientes fiquem explícitas
-# desde o início, em vez de serem descobertas na hora do primeiro deploy.
+# Uma única porta é publicada — a 8080 do backend — porque o objetivo declarado
+# é que as máquinas da rede de casa usem o sistema. O BANCO continua sem porta
+# nenhuma: ele é alcançável só pelos containers da rede "raspybank".
+#
+# Exercitado pela primeira vez em 03/08/2026, no Pi RaspyBank (192.168.15.61),
+# que passou a ser produção nessa data. Antes disso o arquivo era só uma
+# declaração de intenção.
 # =============================================================================
 
 services:
+
+  # ---------------------------------------------------------------------------
+  # Backend
+  # ---------------------------------------------------------------------------
+  # POR QUE ESTE SERVIÇO SÓ EXISTE AQUI, e não no compose.yaml base:
+  # em desenvolvimento o backend NÃO roda pelo Compose — roda pelo "make app"
+  # (spring-boot:run, com recarga rápida) ou pelo "make gate" (docker run
+  # efêmero). Pôr o serviço na base faria o "make up" da VM tentar subir uma
+  # imagem que talvez nem exista lá. O Pi é o único ambiente em que o backend
+  # é um serviço de longa duração.
+  app:
+    image: raspybank:local
+
+    container_name: raspybank-app
+
+    # Volta sozinho depois de reboot ou de uma queda. É o que separa
+    # "está rodando agora" de "é produção".
+    restart: unless-stopped
+
+    # Não adianta subir antes de o banco aceitar conexões: o Flyway roda na
+    # inicialização e a aplicação morreria. "service_healthy" usa o healthcheck
+    # definido no compose.yaml base.
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    # O .env INTEIRO, pelo mesmo motivo documentado no alvo "gate" do Makefile:
+    # variável nova no .env passa a valer sem precisar lembrar de acrescentar
+    # uma linha aqui. Foi assim que o JWT_SEGREDO ficou de fora uma vez.
+    env_file:
+      - ../.env
+
+    environment:
+      # Perfil de produção: log em WARN, sem SQL no log, pool menor.
+      # Vence o env_file em caso de conflito.
+      SPRING_PROFILES_ACTIVE: pi
+
+    ports:
+      # host 80 -> container 8080.
+      #
+      # Publicada em TODAS as interfaces, de propósito: o objetivo é que as
+      # máquinas da rede de casa acessem por http://RaspyBank.local, sem sufixo
+      # de porta. Quem restringe a ORIGEM é o UFW (LAN + VPN), não o bind.
+      #
+      # ATENÇÃO ao mexer: a regra do UFW tem de casar com a porta INTERNA
+      # (8080), não com a publicada (80), porque o DNAT do Docker reescreve o
+      # destino ANTES da cadeia FORWARD onde o ufw-docker atua. Uma regra
+      # "ufw route allow ... port 80" aqui nunca casaria com nada.
+      - "80:8080"
+
+    deploy:
+      resources:
+        limits:
+          # Sobra folga: o Pi tem 8 GB e o Postgres já tem 1 GB reservado.
+          # A JVM lê este limite (MaxRAMPercentage=75 no Dockerfile) e
+          # dimensiona o heap em ~1,1 GB. Sem limite, ela enxergaria os 8 GB
+          # inteiros e o kernel mataria processos ao acaso sob pressão.
+          memory: 1500m
+        reservations:
+          memory: 512m
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    networks:
+      - raspybank
 
   postgres:
 
@@ -75,17 +147,31 @@ volumes:
     driver_opts:
       # Aponta o volume nomeado para uma pasta específica do disco.
       #
-      # POR QUE ISSO É NECESSÁRIO: por padrão, volumes do Docker vivem em
-      # /var/lib/docker, que no Raspberry Pi fica no CARTÃO SD. Banco de dados
-      # grava constantemente, e cartão SD tem número limitado de ciclos de
-      # escrita — ele morre, sem aviso, levando os dados junto.
+      # SÃO DOIS MOTIVOS, e o segundo vale sozinho:
       #
-      # Esta configuração mantém o nome lógico do volume (o compose.yaml não
-      # precisa saber de nada) e move o armazenamento físico para o SSD.
+      # 1. MÍDIA. Por padrão volumes do Docker vivem em /var/lib/docker. Num Pi
+      #    que dá boot por CARTÃO SD, isso põe o banco no pior lugar possível:
+      #    cartão SD tem ciclos de escrita limitados e morre sem aviso, levando
+      #    os dados junto. Esse risco NÃO existe num Pi que dá boot por SSD —
+      #    lá /var/lib/docker já está no lugar certo.
       #
-      # PRÉ-REQUISITO no Pi, antes do primeiro "up":
-      #   sudo mkdir -p /mnt/ssd/raspybank/postgres
-      #   (com o SSD montado em /mnt/ssd via /etc/fstab)
+      # 2. DURABILIDADE CONTRA ENGANO. Com "type: none / o: bind", um
+      #    "docker compose down -v" ou um "docker system prune --volumes"
+      #    remove o VOLUME, mas NÃO apaga o diretório do host. Com volume
+      #    nomeado padrão, esses mesmos comandos levam o banco inteiro.
+      #    Este motivo vale em QUALQUER máquina, com ou sem cartão SD, e é a
+      #    razão de o bind continuar aqui.
+      #
+      # O caminho é variável porque o layout de disco muda de máquina para
+      # máquina. O padrão serve ao Pi com SSD separado montado em /mnt/ssd;
+      # quem tiver outro layout define POSTGRES_DATA_DIR no .env.
+      #
+      # PRÉ-REQUISITO, antes do primeiro "up":
+      #   sudo mkdir -p <o caminho escolhido>
+      #
+      # Não é preciso ajustar dono nem permissão: a imagem do Postgres inicia
+      # como root e faz o chown do PGDATA — que é uma SUBPASTA do ponto de
+      # montagem, justamente por isso — antes de baixar para o usuário postgres.
       type: none
       o: bind
-      device: /mnt/ssd/raspybank/postgres
+      device: ${POSTGRES_DATA_DIR:-/mnt/ssd/raspybank/postgres}
