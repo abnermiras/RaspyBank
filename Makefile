@@ -22,7 +22,7 @@ COMPOSE_PI    = docker compose --env-file .env -f infra/compose.yaml -f infra/co
 -include .env
 
 .DEFAULT_GOAL := help
-.PHONY: help up down restart logs ps psql psql-app db-reset db-dump tools tools-down check-env build test arch app gate diag web web-build web-deps web-audit web-test
+.PHONY: help up down restart logs ps psql psql-app db-reset db-dump tools tools-down check-env build test arch app gate diag web web-build web-deps web-audit web-test pi-deploy pi-up pi-down pi-logs pi-ps pi-test
 
 # Data de corte das dependências do frontend. REGRA: nada publicado há menos de
 # uma semana entra no projeto. O padrão de ataque de cadeia de suprimentos no
@@ -172,4 +172,57 @@ web-audit: ## Mostra as falhas conhecidas nas dependências do frontend
 web-test: ## Roda os testes do frontend (Node puro, sem dependência nova)
 	@for teste in raspybank-web/testes/*.mjs; do \
 		node "$$teste" || exit 1; \
+	done
+
+# -----------------------------------------------------------------------------
+# Raspberry Pi — producao
+# -----------------------------------------------------------------------------
+# Os alvos acima usam COMPOSE_LOCAL. Rodar "make up" no Pi subiria o perfil de
+# DESENVOLVIMENTO — porta do banco publicada, log_statement=all, sem limite de
+# memoria. Por isso o Pi tem alvos proprios, com prefixo "pi-".
+#
+# Nada aqui roda na VM de desenvolvimento: o compose.pi.yaml aponta o volume
+# para um diretorio do host que so existe no Pi.
+
+pi-deploy: check-env  ## No Pi: puxa do git, faz dump, reconstroi a imagem e sobe
+	@test -z "$$(git status --porcelain)" || { \
+		echo "ERRO: ha alteracoes nao commitadas neste Pi."; \
+		echo "      Commite e empurre antes de puxar, ou o pull vai embolar."; \
+		git status --short; \
+		exit 1; \
+	}
+	git pull --ff-only
+	@echo ""
+	@echo ">>> Dump antes de trocar a imagem. Se algo der errado, ele e a volta."
+	$(MAKE) db-dump
+	@echo ""
+	docker build -t raspybank:local .
+	$(COMPOSE_PI) up -d
+	@echo ""
+	@echo "Aguardando o backend ficar saudavel (leva cerca de um minuto)..."
+	@until [ "$$(docker inspect -f '{{.State.Health.Status}}' raspybank-app 2>/dev/null)" = "healthy" ]; do \
+		printf "."; sleep 3; \
+	done
+	@echo ""
+	@echo "No ar em http://raspybank.piratanet.com.br"
+
+pi-up: check-env  ## No Pi: sobe com o perfil de producao
+	$(COMPOSE_PI) up -d
+
+pi-down:  ## No Pi: para, PRESERVANDO os dados
+	$(COMPOSE_PI) down
+
+pi-logs:  ## No Pi: acompanha os logs (Ctrl+C para sair)
+	$(COMPOSE_PI) logs -f
+
+pi-ps:  ## No Pi: estado dos containers de producao
+	$(COMPOSE_PI) ps
+
+# O host do Pi nao tem node, e isso e correto: o Dockerfile compila tudo dentro
+# da imagem. Este alvo roda os mesmos testes de "web-test" num container.
+pi-test:  ## No Pi: roda os testes do frontend sem node instalado no host
+	@for teste in raspybank-web/testes/*.mjs; do \
+		echo "--- $$teste"; \
+		docker run --rm -v "$$PWD/raspybank-web:/w" -w /w \
+			node:22.22.1-bookworm-slim node "$${teste#raspybank-web/}" || exit 1; \
 	done
