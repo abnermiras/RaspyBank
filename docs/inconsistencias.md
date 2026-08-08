@@ -172,6 +172,92 @@ Cada uma das três tem **porteiro na primeira linha** (`conta_id IN (SELECT app_
 
 **A alternativa que estava anotada aqui** — marcar a conta como "saldo parcial neste ambiente" em vez de somar — não foi usada como conserto, mas sobreviveu como **informação**: a conta dividida vem marcada `compartilhada: true`, e é essa marca que explica na tela por que o saldo é maior do que a soma dos lançamentos visíveis.
 
+## I-24 — Editar uma compra no cartão a tirava do total da fatura *(RESOLVIDO em 08/08/2026, em produção)*
+
+**O primeiro defeito encontrado com dado real em produção.** Vale registrar inteiro, porque
+o que ele ensina não é o erro em si — é o formato dele.
+
+### O sintoma
+
+Uma compra de 116,76 no UltraVioleta (fatura 2026-08) foi editada para 119,97, o valor
+certo. Depois disso:
+
+- a **lista** da fatura mostrava 119,97 ✔
+- a **tela de lançamentos** mostrava 119,97 ✔
+- o **total a pagar** mostrava 2.014,06, quando o certo era 2.134,03 ✘
+
+A diferença era **119,97** — o valor **inteiro** do lançamento, não os 3,21 da correção. O
+gasto não tinha ficado desatualizado: tinha parado de ser contado, sem sair da lista.
+
+### A causa
+
+A tela manda o **banco** e o **plástico** (B-D61), e é o servidor que traduz isso na conta
+do cartão, onde o lançamento mora. `registrar` fazia a tradução (`resolverContaDaCompra`);
+**`atualizar` não fazia** — gravava o banco cru em `conta_id` com um `moverPara` direto. O
+`cartao_emitido_id` nem era tocado no PUT.
+
+O resultado é um lançamento com a fatura certa e a conta errada. E é aí que o defeito fica
+invisível, porque as duas telas leem por critérios diferentes:
+
+| Função | Filtro | Efeito |
+|---|---|---|
+| `app_extrato_da_fatura` | `fatura_id` | continua exibindo a compra |
+| `app_total_da_fatura` | `fatura_id` **AND** `conta_id = cartao` | descarta a compra |
+
+O `conta_id = cartao` do total **não é bug**: ele existe para não contar a perna de saída do
+pagamento da fatura, que vive na conta pagadora de propósito (B-D59). O preço dele é que
+qualquer lançamento com a conta corrompida some do total sem sumir da tela.
+
+Efeito colateral que ninguém tinha visto: como `app_saldo_da_conta` soma por `conta_id`, a
+compra passou a debitar o **Nubank** direto, em vez da dívida do cartão.
+
+### O que o banco não pegou
+
+`ck_lancamento_cartao_exige_fatura` exige que a fatura **exista**, não que ela seja a do
+cartão onde a compra mora. Uma `CHECK` de verdade aqui não é possível — o invariante cruza
+`lancamento` e `fatura`, e o Postgres não aceita subconsulta em `CHECK`. Só gatilho.
+
+### A correção (aplicada em 08/08/2026)
+
+Em `LancamentoServico.atualizar`:
+
+1. **Passou a chamar `resolverContaDaCompra`**, a mesma tradução do POST. É a correção da
+   causa.
+2. **Passou a gravar `cartaoEmitidoId`** — antes o PUT o ignorava por completo, então trocar
+   o plástico de uma compra já lançada era impossível, e o silêncio fazia a tela parecer ter
+   obedecido.
+3. `conferirFormaAceita` passou a usar a conta onde o lançamento **mora**, e não a que a tela
+   mandou — é ela que a chave composta `(conta_id, forma_pagamento)` cobra.
+4. **`exigirFaturaCoerente`**, novo: recusa (403) lançamento que fique numa fatura de outro
+   cartão, com `PAGAMENTO_FATURA` isento por ser a única inconsistência legítima. É a guarda
+   que transforma a **classe** do defeito em erro visível.
+
+**Achado junto:** a linha `if (!destino.getCartaoId().equals(l.getContaId()))` comparava a
+fatura de destino contra o **banco**, então *trocar o mês da fatura de uma compra sempre dava
+403* — o recurso pedido explicitamente ("o usuário pode pegar um lançamento e editar ele e
+trocar o mês da fatura") nunca funcionou. Sai consertado de carona, porque agora `conta_id`
+é a conta certa.
+
+**Guardado por** `EdicaoDeCompraNoCartaoTest` (4 casos). O teste foi rodado contra o código
+**sem** a correção e falha em 3 deles — `expected: <119.97> but was: <0.00>` no total da
+fatura e `expected: <403> but was: <200 OK>` na guarda. Um teste de regressão que passa antes
+e depois não guarda nada.
+
+### O que ficou pendente
+
+**Migração V21 com o gatilho no banco**, para o invariante valer também contra SQL manual e
+código futuro que não passe pelo serviço. **Decisão do Abner (08/08/2026): a V21 é feita
+primeiro no ambiente de desenvolvimento**, e vai para o Pi num deploy conjunto depois — não
+junto da correção de código, porque migração de schema é classe de risco diferente: o Flyway
+a aplica no deploy, e uma que falhe no meio impede o app de subir.
+
+### A lição
+
+O invariante que faltava não era sobre o cartão — era sobre **duas leituras do mesmo dado
+discordarem em silêncio**. Onde uma função de leitura filtra por mais colunas que a outra, a
+diferença entre elas é uma corrupção possível que nenhuma tela mostra. Vale procurar os
+outros pares assim antes que o dado real os encontre.
+
 ---
 
 # Situação em 26/07/2026

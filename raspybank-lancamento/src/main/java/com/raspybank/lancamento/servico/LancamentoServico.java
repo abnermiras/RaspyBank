@@ -477,6 +477,13 @@ public class LancamentoServico {
         Categoria categoria = exigirCategoria(ambienteId, dados.categoriaId());
         exigirContaNoAmbiente(ambienteId, dados.contaId());
 
+        // A MESMA traducao do POST, e a ausencia dela aqui era o defeito de
+        // 08/08/2026: a tela manda o BANCO e o plastico (B-D61), e o PUT gravava
+        // o banco cru em conta_id. A compra continuava na fatura e continuava
+        // aparecendo no extrato dela — mas app_total_da_fatura filtra tambem por
+        // conta, entao o valor sumia do total sem sumir da lista.
+        Compra compra = resolverContaDaCompra(ambienteId, dados);
+
         // Uma perna de transferencia nao muda de categoria. Sair de
         // TRANSFERENCIA deixaria um par ligado por lancamento_par_id com
         // classificacoes diferentes em cada lado, e o mapa de gastos passaria a
@@ -493,7 +500,13 @@ public class LancamentoServico {
             l.reclassificar(categoria);
         }
 
-        l.moverPara(dados.contaId());
+        l.moverPara(compra.contaId());
+
+        // O plastico tambem passa a ser gravado. Antes o PUT o ignorava por
+        // completo: trocar o cartao de uma compra ja lancada era impossivel, e o
+        // silencio fazia a tela parecer ter obedecido.
+        l.compradoCom(compra.emitidoId());
+
         l.alterarValor(dados.valor());
         l.ajustarCompetencia(
             Optional.ofNullable(dados.dataCompetencia()).orElse(dados.dataCaixa()));
@@ -512,7 +525,10 @@ public class LancamentoServico {
         // proposital. No PUT a tela mostra o campo ja preenchido com o valor
         // atual, entao mandar vazio e um ato: a pessoa esta LIMPANDO. Reaplicar
         // o padrao seria desfazer, no servidor, o que ela acabou de fazer.
-        l.pagarPor(conferirFormaAceita(dados.contaId(), dados.formaPagamento(), l.getTipo()));
+        //
+        // A conferencia vai pela conta em que o lancamento MORA, e nao pela que a
+        // tela mandou: quem cobra e a chave composta (conta_id, forma_pagamento).
+        l.pagarPor(conferirFormaAceita(compra.contaId(), dados.formaPagamento(), l.getTipo()));
 
         // Mover a compra de ciclo — pedido explicitamente: "o usuario pode pegar
         // um lancamento e editar ele e trocar o mes da fatura".
@@ -535,9 +551,48 @@ public class LancamentoServico {
             l.cobrarNaFatura(destino.getId(), destino.getVencimento(), hoje);
         }
 
+        exigirFaturaCoerente(l, categoria);
         propagarParaOPar(l);
 
         return l;
+    }
+
+    /**
+     * A compra tem de morar na conta do cartao que a fatura cobra.
+     *
+     * <p>E o invariante que faltava, e o que transforma a classe inteira do
+     * defeito de 08/08/2026 em erro visivel. {@code app_total_da_fatura} soma
+     * {@code fatura_id = X AND conta_id = cartao} — o filtro de conta existe
+     * para nao contar a perna de saida do pagamento, que vive na conta pagadora
+     * de proposito (B-D59). O efeito colateral e cruel: um lancamento com a
+     * fatura certa e a conta errada <b>desaparece do total sem sair da lista</b>,
+     * porque {@code app_extrato_da_fatura} filtra so por {@code fatura_id}. A
+     * fatura passa a mentir sem dar sinal nenhum.</p>
+     *
+     * <p>O banco nao pega isso: {@code ck_lancamento_cartao_exige_fatura} exige
+     * que a fatura EXISTA, nao que ela seja a do cartao onde a compra mora. Uma
+     * constraint de verdade aqui teria de olhar duas tabelas, o que em Postgres
+     * significa gatilho.</p>
+     *
+     * <p><b>A unica excecao legitima e o pagamento de fatura</b>, cujas duas
+     * pernas apontam para a fatura e das quais so a entrada vive no cartao.</p>
+     */
+    private void exigirFaturaCoerente(Lancamento l, Categoria categoria) {
+        if (l.getFaturaId() == null
+                || CodigoSistemico.PAGAMENTO_FATURA.name().equals(categoria.getCodigo())) {
+            return;
+        }
+
+        Fatura f = faturas.findById(l.getFaturaId())
+            .orElseThrow(() -> new RecursoNaoEncontrado("Fatura nao encontrada"));
+
+        if (!f.getCartaoId().equals(l.getContaId())) {
+            throw new OperacaoNaoPermitida(
+                "Este lancamento esta na fatura de " + f.getMes() + ", de outro cartao."
+                    + " Tirar a compra do cartao sem tirar da fatura faria o valor sumir"
+                    + " do total sem sumir da lista. Se ela nao foi no cartao, exclua e"
+                    + " lance de novo.");
+        }
     }
 
     /**
