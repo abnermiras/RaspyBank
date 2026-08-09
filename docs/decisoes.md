@@ -42,6 +42,7 @@
 | A13 | Saldo de abertura é um **lançamento de abertura**, nunca campo | Consequência direta do P1 |
 | A14 | Auditoria de autenticação roda em transação **própria** (`REQUIRES_NEW`) | Registro de tentativa de login sobrevive mesmo se a operação principal falhar — tentativa fracassada é o que mais interessa auditar |
 | A15 | Entidade `Usuario` **não mapeia** `senha_hash`; leitura/escrita do hash só via funções SECURITY DEFINER | V8 revogou SELECT da coluna do usuário de aplicação; mapear faria todo findById falhar. Documentação executável: construtor público de Usuario não existe |
+| A16 | Faixas de rede Docker **fixas fora de 172.16–172.31**: `default-address-pools` `10.200.0.0/16` no `daemon.json` (redes automáticas) + subnet `10.201.0.0/24` na rede do projeto (`infra/compose.yaml`) | O Default Switch do Hyper-V opera em 172.x e **reatribui a faixa em reboot do host**. Sem subnet explícito, o Docker escolheu 172.18 e colidiu com o gateway do switch: a VM sumia por SSH com **timeout, não refused** — sshd, ufw e ss todos saudáveis, o diagnóstico apontando pra todo lado menos o certo. Fixar as duas faixas torna o mapa previsível (10.200 = Docker automático, 10.201 = RaspyBank) e imune ao próximo boot. Ressalva: `daemon.json` é config de sistema, **fora do repo** — cada VM/host aplica à mão até virar script de provisionamento. Colisão silenciosa é a pior: some sem dizer por quê |
 
 # 3. Decisões do modelo de domínio (Fase 2 — F1 a F33)
 
