@@ -123,6 +123,10 @@ volumes:
 networks:
   raspybank:
     driver: bridge
-    # Rede própria e isolada. Containers dentro dela se enxergam pelo NOME
-    # do serviço — o backend vai conectar em "postgres:5432", não em endereço IP.
-    # Essa é a razão de o backend não precisar saber nada sobre a rede do host.
+    # Rede própria e isolada. Containers se enxergam pelo NOME do serviço.
+    # Subnet FIXO em 10.201.0.0/24 (fora da faixa 172.16–172.31) para não
+    # colidir com o Default Switch do Hyper-V após reboot do host.
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.201.0.0/24
