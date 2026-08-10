@@ -128,7 +128,7 @@ class CartaoApiTest extends IntegracaoTest {
         // A PRIMEIRA da lista pode ja estar FECHADA, e isso e correto: as
         // faturas nascem a partir do mes corrente, e se o fechamento daquele
         // ciclo ja passou, a leitura o fecha (mesma logica de
-        // SituacaoVencidaServico). Este teste procura a primeira ABERTA — supor
+        // SituacaoServico). Este teste procura a primeira ABERTA — supor
         // que e a de indice zero faria o resultado depender do dia do mes.
         Map<String, Object> aberta = faturas.stream()
             .filter(f -> "ABERTA".equals(f.get("ciclo")))

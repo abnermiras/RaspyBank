@@ -41,6 +41,27 @@ public interface CartaoRepositorio extends JpaRepository<Cartao, UUID> {
         """)
     List<Cartao> ativosDoAmbiente(@Param("ambienteId") UUID ambienteId);
 
+    /**
+     * Os cartoes que NASCERAM neste ambiente e continuam vivos.
+     *
+     * <p>Difere de {@link #ativosDoAmbiente} pela clausula {@code origem}, e a
+     * diferenca e de autoridade, nao de visibilidade: quem recebeu um plastico
+     * dividido enxerga o cartao, mas nao paga a fatura (B-D107) nem fecha o
+     * ciclo (B-D108). A sincronizacao de situacao do I-29 age sobre o
+     * documento inteiro, entao e do dono — a mesma razao de
+     * {@code fecharVencidasSePuder}.</p>
+     */
+    @Query("""
+        SELECT c FROM Cartao c
+         WHERE c.contaId IN (
+               SELECT ca.contaId FROM ContaAmbiente ca
+                WHERE ca.ambienteId = :ambienteId
+                  AND ca.origem = true
+                  AND ca.encerradoEm IS NULL)
+           AND c.encerradoEm IS NULL
+        """)
+    List<Cartao> propriosDoAmbiente(@Param("ambienteId") UUID ambienteId);
+
     /** Existe cartao apontando para esta conta como banco? Guarda o encerramento. */
     long countByContaBancoId(UUID contaBancoId);
 }

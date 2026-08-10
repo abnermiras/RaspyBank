@@ -215,7 +215,7 @@ public interface LancamentoRepositorio extends JpaRepository<Lancamento, UUID> {
      * cada abertura de tela custar uma consulta por lancamento vencido.</p>
      *
      * <p>De mao unica de proposito — so {@code PREVISTO} para {@code REALIZADO},
-     * nunca o contrario. Ver {@link com.raspybank.lancamento.servico.SituacaoVencidaServico}
+     * nunca o contrario. Ver {@link com.raspybank.lancamento.servico.SituacaoServico}
      * para a briga que isso evita com {@code corrigirSituacao}.</p>
      *
      * <p>O filtro por {@code ambienteId} nao esta aqui por seguranca — a RLS ja
@@ -271,6 +271,37 @@ public interface LancamentoRepositorio extends JpaRepository<Lancamento, UUID> {
     /** Guarda a remocao de uma fatura e o encerramento de um cartao. */
     long countByFaturaId(UUID faturaId);
 
+    /**
+     * O previsto que venceu vira realizado (B-D9), <b>menos as compras de
+     * cartao</b>.
+     *
+     * <h4>Por que a exclusao existe</h4>
+     *
+     * <p>I-29. A situacao de uma compra de cartao nao deriva mais da data: ela
+     * responde a fatura estar FECHADA e QUITADA
+     * ({@code ajustarSituacaoDasCompras}). Sem esta exclusao, no dia do
+     * vencimento esta consulta viraria para REALIZADO as compras de uma fatura
+     * que ninguem pagou — afirmando um gasto que nao houve — e as duas regras
+     * ficariam disputando a mesma coluna a cada leitura, uma desfazendo a
+     * outra. Cada ida e volta grava auditoria e evento de outbox, porque
+     * {@code tg_auditar_lancamento} e {@code tg_outbox_lancamento} disparam
+     * em UPDATE.</p>
+     *
+     * <h4>As tres cláusulas de "e compra de cartao"</h4>
+     *
+     * <p>Dentro de uma fatura convivem tres coisas, e so a primeira sai daqui:
+     * a COMPRA (conta do cartao, com fatura); a perna de ENTRADA do pagamento
+     * (tambem na conta do cartao, tambem com fatura); e a perna de SAIDA do
+     * pagamento (conta corrente, e <b>tambem com fatura</b>, por B-D59). As
+     * duas pernas do pagamento continuam derivando da data, que e o dia em que
+     * o dinheiro se moveu de verdade — por isso o {@code OR} que reabre a porta
+     * para {@code PAGAMENTO_FATURA}.</p>
+     *
+     * <p>Filtrar so por {@code faturaId IS NOT NULL} congelaria o pagamento
+     * inteiro; filtrar so pela conta do cartao congelaria a perna de entrada
+     * dele. E a forma exata do defeito do I-24 — uma leitura com menos colunas
+     * que a irma.</p>
+     */
     @Modifying(clearAutomatically = true)
     @Query("""
         UPDATE Lancamento l
@@ -278,7 +309,64 @@ public interface LancamentoRepositorio extends JpaRepository<Lancamento, UUID> {
          WHERE l.ambienteId = :ambienteId
            AND l.situacao   = com.raspybank.lancamento.dominio.SituacaoLancamento.PREVISTO
            AND l.dataCaixa <= :hoje
+           AND (NOT EXISTS (SELECT 1 FROM Fatura f
+                             WHERE f.id = l.faturaId
+                               AND f.cartaoId = l.contaId)
+                OR EXISTS (SELECT 1 FROM Categoria c
+                            WHERE c.id = l.categoriaId
+                              AND c.codigo = 'PAGAMENTO_FATURA'))
         """)
     int realizarPrevistosVencidos(@Param("ambienteId") UUID ambienteId,
                                   @Param("hoje") LocalDate hoje);
+
+    /**
+     * As faturas que tem compra lancada, entre os cartoes informados.
+     *
+     * <p>Recorta o trabalho do I-29 ao que existe: um cartao nasce com doze
+     * ciclos (F20) e ganha mais a cada parcelamento longo, e a maioria nunca
+     * recebe lancamento nenhum. Calcular a quitacao de fatura vazia a cada
+     * leitura seria pagar por nada.</p>
+     *
+     * <p>Sem filtro de ambiente, e de proposito: o total de uma fatura
+     * ATRAVESSA ambientes (B-D87/B-D96), entao o conjunto de faturas a avaliar
+     * tambem precisa atravessar. Quem recorta o alcance e a lista de cartoes,
+     * montada pelo servico a partir dos vinculos de origem.</p>
+     */
+    @Query("""
+        SELECT DISTINCT l.faturaId
+          FROM Lancamento l
+          JOIN Fatura f ON f.id = l.faturaId
+         WHERE f.cartaoId IN :cartaoIds
+           AND l.contaId = f.cartaoId
+        """)
+    List<UUID> faturasComLancamentoNoCartao(@Param("cartaoIds") Collection<UUID> cartaoIds);
+
+    /**
+     * Poe as compras destas faturas na situacao decidida pelo I-29.
+     *
+     * <p>Mesmo recorte de {@code realizarPrevistosVencidos}, pelo outro lado:
+     * la ele exclui, aqui ele inclui. As compras sao as linhas na conta do
+     * cartao que nao sao o pagamento — as duas pernas dele seguem a data.</p>
+     *
+     * <p><b>{@code l.situacao <> :alvo} nao e otimizacao, e correcao.</b>
+     * {@code tg_auditar_lancamento} e {@code tg_outbox_lancamento} disparam
+     * em UPDATE por LINHA: sem esta clausula, toda leitura de tela regravaria
+     * as mesmas compras no mesmo valor e encheria a trilha de auditoria e o
+     * outbox de eventos que nao contam mudanca nenhuma.</p>
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+        UPDATE Lancamento l
+           SET l.situacao = :alvo
+         WHERE l.faturaId IN :faturaIds
+           AND l.situacao <> :alvo
+           AND EXISTS (SELECT 1 FROM Fatura f
+                        WHERE f.id = l.faturaId
+                          AND f.cartaoId = l.contaId)
+           AND NOT EXISTS (SELECT 1 FROM Categoria c
+                            WHERE c.id = l.categoriaId
+                              AND c.codigo = 'PAGAMENTO_FATURA')
+        """)
+    int ajustarSituacaoDasCompras(@Param("faturaIds") Collection<UUID> faturaIds,
+                                  @Param("alvo") SituacaoLancamento alvo);
 }

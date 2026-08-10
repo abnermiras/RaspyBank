@@ -8,7 +8,7 @@ import {
 import Aviso from '../componentes/Aviso.jsx'
 import PainelDeCompartilhamento from '../componentes/PainelDeCompartilhamento.jsx'
 import { useCarregar } from '../ganchos/useCarregar.js'
-import { data, dinheiro, paraCampo, paraDecimal } from '../util/formato.js'
+import { data, dinheiro, hojeISO, paraCampo, paraDecimal } from '../util/formato.js'
 import {
   carregarFormasDePagamento,
   formasDaContaNoSentido,
@@ -905,9 +905,16 @@ function FormularioDePagamento({ fatura, cartao, contas, formas, aoGravar, aoCan
 
         <label>
           Data
+          {/*
+            hojeISO() e nao toISOString(): o segundo devolve UTC, e das 21h em
+            diante em Sao Paulo ele abre o campo com AMANHA. Um pagamento feito
+            as 22h nascia com data_caixa do dia seguinte e, por B-D9, PREVISTO —
+            a fatura ficava quitada com o proprio pagamento previsto (I-28).
+            E a mesma armadilha que B-D8 ja resolveu no banco, escapada na tela.
+          */}
           <input
             type="date" name="dataCaixa" required
-            defaultValue={new Date().toISOString().slice(0, 10)}
+            defaultValue={hojeISO()}
           />
         </label>
 

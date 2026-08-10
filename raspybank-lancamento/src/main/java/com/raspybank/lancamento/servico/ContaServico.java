@@ -64,7 +64,7 @@ public class ContaServico {
     private final CategoriaRepositorio categorias;
     private final LancamentoRepositorio lancamentos;
     private final ContaFormaPagamentoRepositorio formasDePagamento;
-    private final SituacaoVencidaServico vencidos;
+    private final SituacaoServico situacoes;
     private final CompartilhamentoContaServico compartilhamentos;
 
     @PersistenceContext
@@ -75,14 +75,14 @@ public class ContaServico {
                         CategoriaRepositorio categorias,
                         LancamentoRepositorio lancamentos,
                         ContaFormaPagamentoRepositorio formasDePagamento,
-                        SituacaoVencidaServico vencidos,
+                        SituacaoServico situacoes,
                         CompartilhamentoContaServico compartilhamentos) {
         this.contas = contas;
         this.vinculos = vinculos;
         this.categorias = categorias;
         this.lancamentos = lancamentos;
         this.formasDePagamento = formasDePagamento;
-        this.vencidos = vencidos;
+        this.situacoes = situacoes;
         this.compartilhamentos = compartilhamentos;
     }
 
@@ -102,7 +102,7 @@ public class ContaServico {
         // O saldo REALIZADO e uma soma filtrada por situacao: sem a virada, o
         // boleto vencido ontem ficaria de fora do numero que a pessoa confere
         // contra o extrato do banco.
-        vencidos.realizarVencidos(ambienteId, LocalDate.now());
+        situacoes.sincronizar(ambienteId, LocalDate.now());
 
         // Bancarias: o cartao e uma conta, mas nao e um lugar onde se guarda
         // dinheiro, e mostra-lo aqui confunde (B-D62). Ele tem tela propria.
@@ -174,7 +174,7 @@ public class ContaServico {
      */
     @Transactional(readOnly = true)
     public Resumo resumo(UUID ambienteId, UUID contaId) {
-        vencidos.realizarVencidos(ambienteId, LocalDate.now());
+        situacoes.sincronizar(ambienteId, LocalDate.now());
         Conta c = exigir(ambienteId, contaId);
 
         SaldoDaConta saldo = saldo(ambienteId, contaId);
@@ -220,7 +220,7 @@ public class ContaServico {
      */
     @Transactional(readOnly = true)
     public SaldoDaConta saldo(UUID ambienteId, UUID contaId) {
-        vencidos.realizarVencidos(ambienteId, LocalDate.now());
+        situacoes.sincronizar(ambienteId, LocalDate.now());
         exigir(ambienteId, contaId);
 
         Object[] l = (Object[]) em.createNativeQuery(
@@ -246,7 +246,7 @@ public class ContaServico {
     @SuppressWarnings("unchecked")
     public List<LinhaDoExtrato> extrato(UUID ambienteId, UUID contaId,
                                         LocalDate inicio, LocalDate fim) {
-        vencidos.realizarVencidos(ambienteId, LocalDate.now());
+        situacoes.sincronizar(ambienteId, LocalDate.now());
         exigir(ambienteId, contaId);
 
         List<Object[]> linhas = em.createNativeQuery("""

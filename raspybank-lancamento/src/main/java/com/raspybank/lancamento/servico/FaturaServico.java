@@ -63,6 +63,7 @@ public class FaturaServico {
     private final ContaAmbienteRepositorio vinculos;
     private final ContaFormaPagamentoRepositorio formasDePagamento;
     private final LancamentoServico lancamentoServico;
+    private final SituacaoServico situacoes;
 
     @PersistenceContext
     private EntityManager em;
@@ -74,7 +75,8 @@ public class FaturaServico {
                          ContaRepositorio contas,
                          ContaAmbienteRepositorio vinculos,
                          ContaFormaPagamentoRepositorio formasDePagamento,
-                         LancamentoServico lancamentoServico) {
+                         LancamentoServico lancamentoServico,
+                         SituacaoServico situacoes) {
         this.faturas = faturas;
         this.cartoes = cartoes;
         this.lancamentos = lancamentos;
@@ -83,6 +85,7 @@ public class FaturaServico {
         this.vinculos = vinculos;
         this.formasDePagamento = formasDePagamento;
         this.lancamentoServico = lancamentoServico;
+        this.situacoes = situacoes;
     }
 
     // =========================================================================
@@ -93,7 +96,7 @@ public class FaturaServico {
      * As faturas de um ano, com os numeros calculados.
      *
      * <p>Fecha as vencidas antes de responder, pelo mesmo criterio de
-     * {@code SituacaoVencidaServico}: sem isso, uma fatura cujo fechamento
+     * {@code SituacaoServico}: sem isso, uma fatura cujo fechamento
      * passou continuaria aberta e recebendo compra nova — e o mes seguinte
      * comecaria errado sem ninguem perceber.</p>
      */
@@ -101,6 +104,11 @@ public class FaturaServico {
     public List<Item> listar(UUID ambienteId, UUID cartaoId, int ano, LocalDate hoje) {
         exigirCartao(ambienteId, cartaoId);
         fecharVencidasSePuder(ambienteId, cartaoId, hoje);
+
+        // DEPOIS de fechar, nunca antes: fechar e metade da condicao do I-29, e
+        // a fatura que acabou de fechar quitada muda a situacao das compras dela
+        // nesta mesma leitura.
+        situacoes.sincronizar(ambienteId, hoje);
 
         List<Fatura> lista = faturas.doAno(cartaoId,
             LocalDate.of(ano, 1, 1), LocalDate.of(ano, 12, 1));
@@ -115,6 +123,7 @@ public class FaturaServico {
 
         exigirCartao(ambienteId, f.getCartaoId());
         fecharVencidasSePuder(ambienteId, f.getCartaoId(), hoje);
+        situacoes.sincronizar(ambienteId, hoje);
 
         return comNumeros(List.of(f), f.getCartaoId(), ambienteId, hoje).get(0);
     }
@@ -137,6 +146,11 @@ public class FaturaServico {
         Fatura f = faturas.findById(faturaId)
             .orElseThrow(() -> new RecursoNaoEncontrado("Fatura nao encontrada"));
         exigirCartao(ambienteId, f.getCartaoId());
+
+        // O extrato mostra a situacao de cada linha, entao ele precisa da mesma
+        // sincronizacao da lista (I-29) — senao a fatura diria QUITADA no
+        // cabecalho e PREVISTO em cada gasto dentro dela.
+        situacoes.sincronizar(ambienteId, LocalDate.now());
 
         List<Object[]> linhas = em.createNativeQuery("""
                 SELECT id, meu, data_caixa, data_competencia, tipo, situacao, valor,
@@ -217,7 +231,7 @@ public class FaturaServico {
      * Fecha as que passaram do fechamento previsto.
      *
      * <p>Na leitura e nao num job agendado, pela mesma razao de
-     * {@code SituacaoVencidaServico}: rotina de fundo nao tem identidade na
+     * {@code SituacaoServico}: rotina de fundo nao tem identidade na
      * sessao, entao a RLS nao a enxerga e o UPDATE alcancaria zero linhas.</p>
      */
     /**

@@ -490,6 +490,53 @@ No seletor de conta dela entra **"Nubank de Abner"** — com o dono no rótulo, 
 
 Antes disso o cartão dividido aparecia embaixo de **todas** as contas dela — escolher "C6 dela" e ver "UltraVioleta de Abner" era exatamente o lixo que ele apontou, e uma incoerência que eu tinha criado.
 
+# 4p. A situação de uma compra de cartão segue a FATURA (09/08/2026) — B-D113
+
+Origem: ele fechou uma fatura à mão, pagou o total, e os seis lançamentos dentro dela continuaram `PREVISTO`. Registrado como I-29 antes de virar decisão.
+
+| # | Decisão | Motivo resumido |
+|---|---|---|
+| B-D113 | **Compra de cartão é `REALIZADO` se, e somente se, a fatura estiver FECHADA e QUITADA. Em qualquer outro caso, `PREVISTO` — independente da data.** B-D9 continua valendo para todo o resto | A data de caixa de uma compra é o vencimento da fatura (F14), e vencimento é uma **previsão** de quando o dinheiro sai. Derivar a situação dela errava nos **dois** sentidos: fatura paga antes do vencimento mantinha as compras previstas — a fatura dizia QUITADA no cabeçalho e "ainda vai sair" em cada linha — e fatura vencida e não paga virava tudo para realizado no dia do vencimento, afirmando no mapa um gasto que não houve. Palavras dele: *"fechei a fatura manual e fiz o pagamento dela, deveria tirar esses lançamentos de previsto"* |
+
+## Por que FECHADA *e* quitada, e não quitada sozinha
+
+A recomendação na conversa foi "quitada sozinha", com o argumento de que exigir fechada quebraria a antecipação (B-D57). **O argumento estava errado**, e ele escolheu o outro caminho: antecipação libera limite por `consumido() = saldo.comPrevistos().abs()`, que soma previsto e realizado igual — nunca dependeu da situação das compras.
+
+E exigir *fechada* elimina de graça um efeito ruim: com "quitada sozinha", pagar por inteiro uma fatura **aberta** realizaria tudo, e a próxima compra a cair nela desfaria a quitação e mandaria todas as compras de volta para previsto. Fatura fechada não recebe lançamento novo (`exigirFaturaAberta`), então o total para de se mexer e **a regra fica estável por construção**.
+
+| | não quitada | quitada |
+|---|---|---|
+| **aberta** | PREVISTO | PREVISTO |
+| **fechada** | PREVISTO | **REALIZADO** |
+
+**Pagamento parcial não aloca nada.** Não há regra que diga quais compras foram pagas com 100 de uma fatura de 282, e inventar uma seria inventar dado. Não quitada é previsto, inteira — e os 100 que saíram do bolso aparecem na perna de SAÍDA do pagamento, na conta corrente, que segue a própria data.
+
+## O que a implementação acrescentou
+
+**Recalcula na leitura, não vira no pagamento.** A quitação muda por caminhos demais — pagar, excluir um pagamento, editar o valor de um pagamento, editar o valor de uma compra, lançar compra em fatura aberta, fechar, reabrir, e um dia o crédito do I-25. Um flip por caminho são sete lugares para esquecer um, e o esquecido não dá sinal. `SituacaoVencidaServico` virou **`SituacaoServico`** com as duas regras e um ponto de entrada (`sincronizar`), porque um nome que descreve metade do trabalho é um nome que mente.
+
+**O recorte tem três cláusulas, e nenhuma é dispensável.** Dentro de uma fatura convivem a COMPRA, a perna de ENTRADA do pagamento (também na conta do cartão) e a perna de SAÍDA do pagamento (conta corrente, e **também com `fatura_id`**, por B-D59). Só a primeira é governada: `conta_id` = conta do cartão **E** `fatura_id` preenchido **E** categoria ≠ `PAGAMENTO_FATURA`. Filtrar só por `fatura_id` congelaria o pagamento inteiro — é a forma exata do defeito do I-24.
+
+**O UPDATE só toca linha que muda** (`situacao <> :alvo`). Não é otimização: `tg_auditar_lancamento` e `tg_outbox_lancamento` disparam em UPDATE por linha, e sem a cláusula toda leitura de tela encheria a trilha de auditoria e o outbox de eventos que não contam mudança nenhuma.
+
+**Os totais vêm de `app_total_da_fatura`**, não do repositório: o total de uma fatura atravessa ambientes (B-D87/B-D96), e a soma recortada pela RLS faria uma fatura parecer quitada por faltar compra de quem divide o cartão — realizando as compras do dono sem ninguém ter pago.
+
+**Só para cartão próprio do ambiente** (B-D107/B-D108), pela mesma razão de `fecharVencidasSePuder`: quem recebeu um plástico não paga a fatura nem fecha o ciclo.
+
+## O que isto custou, e foi aceito
+
+- **A virada é de mão DUPLA**, ao contrário da regra da data. `corrigirSituacao` (B-D22) deixa de valer para compra de cartão — a próxima leitura desfaz a correção. Defensável: a situação de uma compra deixou de ser julgamento e virou fato derivado da fatura.
+- **Reabrir uma fatura paga devolve tudo para previsto**, e fechar de novo devolve para realizado. Coerente com B-D50.
+- **Fatura nunca paga mantém as compras previstas para sempre.** É dívida em aberto, e mostrar isso é informação — mas o mapa acumula previsto antigo.
+
+Verificada por `SituacaoDeCompraNoCartaoTest` (6 casos), que falha em 3 deles contra o código sem a correção. `SituacaoVencidaTest` continua verde: B-D9 não foi tocado.
+
+# 4q. Data de tela é data LOCAL (09/08/2026) — B-D114
+
+| # | Decisão | Motivo resumido |
+|---|---|---|
+| B-D114 | **Nenhum campo de data da tela é preenchido com `toISOString()`.** O helper é `hojeISO()`, que usa os getters locais | `toISOString()` devolve UTC, e das 21h em diante em São Paulo ele abre o campo com **amanhã**. Um pagamento feito às 22h nascia com `data_caixa` do dia seguinte e, por B-D9, `PREVISTO` — a fatura ficava quitada com o próprio pagamento previsto. É a mesma armadilha que B-D8 já tinha resolvido no banco (`date` em vez de instante), escapada na tela. Achada como I-28, no formulário de pagamento da T-06, que era a **única** ocorrência no frontend |
+
 # 5. Revisões registradas (R1–R6, sessão de requisitos)
 
 Decisões que substituíram decisões anteriores durante o próprio processo. O motivo da mudança é tão importante quanto a decisão final.

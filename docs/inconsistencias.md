@@ -260,6 +260,263 @@ outros pares assim antes que o dado real os encontre.
 
 ---
 
+# Achados da conversa de 09/08/2026 — crédito na fatura do cartão
+
+Origem: caso real trazido pelo Abner. O Ultravioleta do Nubank devolve o IOF — a assinatura
+do Claude custa R$ 110 com IOF e o banco credita R$ 10 depois. Não há como registrar isso
+hoje. Os três itens abaixo saíram da varredura desse caso; **o I-25 está aberto por decisão
+explícita ("não estou conseguindo decidir, fica depois"), e os outros dois são defeitos que
+existem independentemente de como o I-25 se resolva.**
+
+## I-25 — Dinheiro que entra na fatura do cartão não tem modelo
+
+**O caso.** Estorno de compra estornada depois do fechamento, estorno feito numa fatura
+posterior à da compra, e benefício creditado na fatura — o desconto que o Nubank dá por
+antecipar parcelas. Nos três, dinheiro entra no cartão sem ser pagamento de fatura.
+
+**Por que não dá hoje.** `raspybank-web/src/api/recursos.js:267` não oferece os plásticos
+quando o sentido é `ENTRADA` — *"Cartão de crédito só serve para SAÍDA: ninguém recebe
+salário no cartão"*. O comentário está certo sobre salário e não cobre este caso.
+
+**O resto do caminho já aceita.** Conferido linha a linha: `AJUSTE` é `AMBOS` (V12:77);
+`LancamentoServico.registrar`, `resolverContaDaCompra` e `registrarNoCartao` não filtram tipo
+em ponto nenhum; nenhum CHECK impede `ENTRADA` em conta de cartão (`ck_lancamento_cartao_exige_fatura`
+é de mão única); `resolverFormaDePagamento` devolve nulo para sistêmica, então o crédito não
+nasce com forma grudada; o extrato da fatura já desenha `ENTRADA` com `+` (`Cartoes.jsx:681`);
+e o limite se corrige sozinho, porque `consumido()` é `saldo.comPrevistos().abs()`. **A
+ausência é de modelo e de tela, não de infraestrutura.**
+
+### O que já ficou decidido (não precisa ser repensado)
+
+1. **Estorno total com a fatura ainda aberta e não paga → exclua o lançamento.** Mostrar a
+   compra de R$ 100 na padaria e um estorno de R$ 100 na mesma fatura descreve um evento que
+   se anulou; as duas linhas só produzem confusão no mapa. A auditoria não se perde:
+   `tg_lancamento_auditoria` grava a linha inteira antes de ela sumir.
+2. **Estorno parcial com a fatura ainda aberta e não paga → edite o valor** (R$ 150 vira
+   R$ 100). Mesmo argumento.
+3. **A fronteira não é "total × parcial", é "a fatura já foi paga?"** — enunciada assim
+   porque foi assim que ela apareceu. Enquanto a fatura está aberta e ninguém pagou, a compra
+   estornada economicamente não aconteceu, e reescrever a linha é honesto. Depois do
+   pagamento, apagar a linha faz o pagamento daquele mês deixar de bater com a fatura daquele
+   mês. **É esta regra que decide qual caminho vale, e é dela que sai o I-27.**
+4. **Categoria única para estorno e desconto.** Para o código os dois são a mesma coisa —
+   dinheiro entrando na fatura que não é pagamento. Duas categorias com comportamento
+   idêntico seriam uma distinção que nenhuma rotina consegue usar; a diferença mora na
+   descrição digitada.
+5. **É uma categoria sistêmica, não um `TipoLancamento` novo.** `TipoLancamento` tem dois
+   valores porque o sinal do dinheiro mora ali; um terceiro quebraria toda soma que hoje faz
+   `CASE WHEN tipo = 'SAIDA'`. E precisa ser sistêmica porque o código tem de encontrá-la
+   sozinho para distinguir crédito de pagamento — que é a definição de `CodigoSistemico`.
+6. **Nome sugerido:** código `ESTORNO_DESCONTO`, nome de tela "Estornos e descontos".
+   Evitar a palavra "crédito" no código é convenção do projeto — em português ela significa
+   "cartão de crédito" e "entrou dinheiro" ao mesmo tempo, e foi por isso que
+   `FormaPagamento` tem `CREDITO_EM_CONTA` e não `CREDITO`.
+7. **Entra no mapa** (`entra_no_mapa = true`), como entrada. Não há risco de contagem dupla:
+   a compra está no bloco de saídas, o crédito no de entradas. Efeito colateral aceito e
+   conhecido: estorno que cai numa fatura posterior deixa o gasto num mês e o crédito no
+   seguinte — o ano fecha certo, o mês a mês não. É a mesma conta que o regime de caixa já
+   cobra em B-D54.
+
+### O que ainda não tem decisão
+
+**Como a fatura mostra o crédito.** `TotalDaFatura` tem dois baldes — `total` = saídas na
+conta do cartão, `pago` = **todas** as entradas — e está assim em duas leituras que precisam
+concordar: o JPQL de `LancamentoRepositorio.java:244` e a função `app_total_da_fatura`
+(V17:72). Sem um terceiro balde, o crédito de R$ 10 é contado como pagamento: "A pagar" fica
+certo (R$ 100), mas "Compras" diz R$ 110, "Pago" diz R$ 10 que ninguém pagou, e a T-06 mostra
+o aviso de fatura parcialmente paga numa fatura intocada.
+
+As duas saídas:
+
+- **(a) Compras líquidas.** Coluna Compras passa a R$ 100; o crédito aparece só como linha no
+  extrato. Nenhuma coluna nova na T-06. Custo: "Compras R$ 100" numa fatura onde se comprou
+  R$ 110 é meia verdade.
+- **(b) Coluna própria.** Compras R$ 110 · Créditos R$ 10 · Pago R$ 0 · A pagar R$ 100. Não
+  mente em lugar nenhum. Custo: um campo em `TotalDaFatura`, um `CASE` a mais nas duas
+  consultas (as duas já têm essa forma) e uma coluna na T-06.
+
+Recomendação registrada na conversa: **(b)** — o desconto por antecipação é informação que se
+quer ver, não diluir dentro do total de compras.
+
+**Nos dois casos**, `Fatura.quitacao()` e `Fatura.estaVencida()` passam a comparar o pago
+contra o total **líquido**. Sem isso, uma fatura de R$ 110 com R$ 10 de crédito e R$ 100 pagos
+nunca fica quitada — e, pior, uma fatura inteiramente creditada nasce "vencida".
+
+**Quando resolver:** quando houver decisão sobre a apresentação. Nada aqui bloqueia o que já
+está no ar; o caso real é contornável registrando o crédito como entrada numa conta comum,
+ao custo de a fatura não refletir o abatimento.
+
+## I-26 — `app_total_do_plastico` soma sem olhar o tipo
+
+`app_total_do_plastico` (V19:503) faz `SUM(l.valor)` e `SUM(CASE WHEN situacao = 'REALIZADO' ...)`
+**sem filtrar por `tipo`**. A função assume que todo lançamento de um plástico é compra — o
+que é verdade hoje, e só hoje.
+
+É defeito latente: não há como criar `ENTRADA` com `cartao_emitido_id` preenchido enquanto a
+tela do I-25 não existir. No dia em que existir, o crédito de R$ 10 é **somado** ao consumo
+do plástico em vez de subtraído, e o número que a pessoa que recebeu um adicional vê (B-D110)
+passa a mentir para cima.
+
+É o mesmo padrão da lição do I-24: duas leituras do mesmo dado com filtros diferentes.
+`app_total_da_fatura` distingue `SAIDA` de `ENTRADA`; a irmã dela não.
+
+**Quando resolver:** junto do I-25, na mesma migração — ou antes, isoladamente, já que a
+correção (saídas menos entradas) está certa independentemente de como o I-25 se resolva.
+
+## I-27 — Editar valor de lançamento em fatura fechada e paga
+
+`LancamentoServico.atualizar` (linha 474) exige fatura aberta apenas para **mover** um
+lançamento de fatura (`exigirFaturaAberta`, na troca de `faturaId`). Alterar o **valor** de
+uma compra que está numa fatura já fechada e já paga passa sem guarda: `l.alterarValor(...)`
+é chamado direto.
+
+O sintoma é o total da fatura de um mês encerrado mudar depois do fato, deixando de bater com
+o pagamento que foi feito contra ele. Nenhuma tela denuncia.
+
+Hoje isso é um defeito discreto. **Com o I-25 ele vira um buraco na regra**, porque as
+decisões 1 e 2 acima tornam "edite ou exclua" o caminho *oficial* do estorno — e um caminho
+oficial que funciona onde não deveria é pior do que não ter caminho.
+
+**Quando resolver:** antes ou junto do I-25. A guarda é pequena e não depende da decisão de
+apresentação.
+
+---
+
+# Achados da sessão de 09/08/2026 — situação de lançamento de cartão
+
+Origem: o Abner fechou uma fatura à mão, pagou o total, e os lançamentos continuaram
+`PREVISTO`. A investigação separou **dois defeitos independentes** que produziam o mesmo
+sintoma na mesma tela.
+
+Evidência colhida no banco de desenvolvimento em 09/08/2026:
+
+```
+UltraVioleta · ago/2026 · vence 18/08 · FECHADA · total 282,00 · pago 282,00 (quitada)
+  6 compras   SAIDA   PREVISTO   data_caixa 2026-08-18
+  pagamento   par     PREVISTO   data_caixa 2026-08-10   <- I-28
+```
+
+## I-28 — A data do pagamento de fatura vem em UTC — **RESOLVIDO em 09/08/2026**
+
+`raspybank-web/src/telas/Cartoes.jsx:910` preenche o campo Data do formulário de pagamento
+com `new Date().toISOString().slice(0, 10)`. **`toISOString()` devolve UTC.** Em São Paulo,
+das 21h em diante o campo abre com o dia seguinte.
+
+Foi o que aconteceu: pagamento feito às 22h de 09/08 gravado como `data_caixa = 2026-08-10`.
+Por B-D9 o par nasce `PREVISTO` — corretamente, para uma data que não é a real.
+
+É a classe de erro que o projeto já documentou em B-D8, no javadoc de `Lancamento`: *"um
+lançamento às 21h de 31/jan em São Paulo seria 01/fev em UTC e cairia no MÊS ERRADO"*. Ali a
+lição foi aplicada ao banco (`date` em vez de instante); aqui ela escapou na tela.
+
+**Correção:** trocar por `hojeISO()` (`raspybank-web/src/util/formato.js:161`), que usa
+`getFullYear/getMonth/getDate` locais e já é o helper usado pelo formulário de lançamentos.
+Uma linha. Varredura feita: esta é a **única** ocorrência de `toISOString` em todo o
+frontend, e o backend está correto (`TZ=America/Sao_Paulo` no `Dockerfile:126`, no
+`infra/compose.yaml:68` e no `.env.example:63`).
+
+**Dado já gravado:** corrigível pela tela, editando o pagamento para a data real.
+
+**Resolução:** trocado por `hojeISO()`. Decisão **B-D114** em `decisoes.md` (§4q). O dado
+antigo continua exigindo a edição manual descrita acima — a correção vale para pagamentos
+novos, não reescreve o passado.
+
+## I-29 — A situação de compra de cartão ignora o pagamento da fatura, e erra nos dois sentidos — **RESOLVIDO em 09/08/2026**
+
+Hoje `situacao` deriva só da data de caixa (B-D9), e a data de caixa de uma compra no cartão
+é o **vencimento** da fatura (F14). Nem `FaturaServico.fechar` nem `FaturaServico.pagar`
+tocam na situação das compras. `realizarPrevistosVencidos`
+(`LancamentoRepositorio.java:278-280`) filtra só por data, sem olhar fatura nenhuma.
+
+Resultado — o erro acontece nas **duas** direções:
+
+- **Fatura fechada e paga antes do vencimento:** as compras seguem `PREVISTO` até o
+  vencimento chegar. A fatura diz QUITADA e cada linha dentro dela diz "o dinheiro ainda vai
+  sair". É o caso que originou esta investigação.
+- **Fatura vencida e não paga:** no dia do vencimento as compras viram `REALIZADO` sozinhas.
+  O dinheiro nunca saiu, e o mapa daquele mês passa a afirmar um gasto que não houve.
+
+É o padrão da lição do I-24: duas leituras do mesmo fato discordando em silêncio.
+
+### A regra decidida (Abner, 09/08/2026)
+
+> **Compra de cartão é `REALIZADO` se, e somente se, a fatura estiver FECHADA e QUITADA.
+> Em qualquer outro caso, `PREVISTO` — independente da data.**
+>
+> **Todo o resto do sistema continua derivando da data, como hoje** (B-D9 intacto). O boleto
+> do condomínio agendado para 30/08 vira realizado sozinho em 30/08, e foi para não ter flag
+> manual que B-D9 existe.
+
+| | não quitada | quitada |
+|---|---|---|
+| **aberta** | PREVISTO | PREVISTO |
+| **fechada** | PREVISTO | **REALIZADO** |
+
+**Por que "fechada E quitada" e não "quitada" sozinha.** A recomendação na conversa foi
+"quitada sozinha", com o argumento de que exigir fechada quebraria a antecipação (B-D57). O
+argumento estava errado: antecipação libera limite por `consumido() = saldo.comPrevistos().abs()`,
+que soma previsto e realizado igual — nunca dependeu da situação das compras. E exigir
+*fechada* elimina de graça um efeito ruim: com "quitada sozinha", pagar uma fatura **aberta**
+por inteiro realizaria tudo, e a próxima compra a cair naquela fatura desfaria a quitação e
+mandaria todas as compras de volta para previsto. Fatura fechada não recebe lançamento novo
+(`exigirFaturaAberta`), então o total para de se mexer e a regra fica estável por construção.
+
+### O recorte — três cláusulas, e nenhuma é dispensável
+
+"Lançamento de cartão" não é `fatura_id IS NOT NULL`. Dentro de uma fatura convivem três
+coisas, e só a primeira é governada pela regra nova:
+
+1. As **compras** — `conta_id` = conta do cartão, `fatura_id` preenchido. Regra nova.
+2. A **perna de entrada do pagamento** — também na conta do cartão, também com `fatura_id`.
+   Ela *é* o pagamento; segue a própria data.
+3. A **perna de saída do pagamento** — conta corrente, e **também carrega `fatura_id`**
+   (B-D59, para o extrato da corrente dizer qual fatura aquele dinheiro pagou). Dinheiro
+   saindo do banco na data dela.
+
+O recorte correto é: `conta_id` = conta do cartão **E** `fatura_id` preenchido **E** categoria
+≠ `PAGAMENTO_FATURA`. Filtrar por `fatura_id` sozinho congelaria o pagamento; é exatamente a
+forma do defeito do I-24.
+
+### Forma de implementação recomendada
+
+**Recalcular na leitura**, como irmão do `SituacaoVencidaServico`, e **não** um flip no
+momento do pagamento. A quitação muda por caminhos demais — pagar, excluir um pagamento,
+editar o valor de um pagamento, editar o valor de uma compra, lançar compra em fatura aberta,
+fechar, reabrir, e amanhã um crédito do I-25. Um flip por caminho são sete lugares para
+esquecer um; um recálculo na leitura é auto-curável, qualquer que tenha sido o caminho.
+
+`realizarPrevistosVencidos` ganha a exclusão das compras de cartão, senão os dois disputam a
+mesma coluna.
+
+### Custos aceitos
+
+- **A virada passa a ser de mão dupla.** O `SituacaoVencidaServico` é de mão única de
+  propósito, para não brigar com `corrigirSituacao` (B-D22). Para compra de cartão essa
+  liberdade some: a situação deixa de ser julgamento e vira fato derivado da fatura.
+  Corrigir na mão passa a ser desfeito na próxima leitura.
+- **Reabrir uma fatura paga devolve tudo para previsto.** Coerente, e reversível fechando de
+  novo. Consequência de B-D50 permitir reabrir fatura quitada.
+- **Fatura nunca paga mantém as compras previstas para sempre.** É dívida em aberto, e
+  mostrar isso é informação — mas o mapa passa a acumular previsto antigo.
+- **Sinergia com o I-27:** editar o valor de uma compra numa fatura fechada e paga desfaz a
+  quitação e joga a fatura inteira de volta para previsto. O defeito do I-27 passa a se
+  denunciar sozinho em vez de mudar um total em silêncio.
+
+**Resolução:** implementada como descrito. Decisão **B-D113** em `decisoes.md` (§4p).
+`SituacaoVencidaServico` virou `SituacaoServico`, com as duas regras e um ponto de entrada
+(`sincronizar`), chamado onde a antiga já era mais as três leituras de fatura da T-06.
+Guardada por `SituacaoDeCompraNoCartaoTest` (6 casos) — rodada contra o módulo **sem** a
+correção, falha em 3 deles: `expected: <REALIZADO> but was: <PREVISTO>` nas duas metades do
+fluxo de pagamento e `expected: <PREVISTO> but was: <REALIZADO>` na fatura vencida e não
+paga. `SituacaoVencidaTest` continua verde: B-D9 não foi tocado.
+
+**Segue aberto o I-27**, que é a mesma superfície e não foi resolvido aqui — mas mudou de
+cara: com B-D113, editar o valor de uma compra numa fatura fechada e paga desfaz a quitação
+e joga a fatura inteira de volta para previsto. O defeito passou a se denunciar sozinho em
+vez de mudar um total em silêncio.
+
+---
+
 # Situação em 26/07/2026
 
 **Resolvidos:** I-01, I-02, I-03, I-05, I-09, I-10, I-11, I-12, I-14, I-15, I-16, I-17, I-19, I-20, I-21, I-22.
