@@ -122,3 +122,56 @@ velocidade — é isolamento de contexto e ausência de viés de autor.
 
 Ordem típica de uma entrega: decisão registrada → migração → regra de domínio → borda HTTP →
 tela → `qa-adversarial` → `revisor-de-fronteiras` → `make gate`.
+
+## Fluxo de um defeito
+
+### O relato é sintoma, não diagnóstico
+
+Quem reporta descreve **o que fez, o que esperava e o que aconteceu** — não a causa que
+imagina. O I-24 é a prova: o relato foi *"diz que não aceita número negativo"*, e não havia
+negativo nenhum envolvido; o defeito era o `"1450,22"` com vírgula. Teoria no relato faz o
+conserto começar no lugar errado.
+
+Agente que receber relato já diagnosticado **verifica o diagnóstico antes de aceitá-lo**, e diz
+quando ele não se sustenta.
+
+### Os cinco passos
+
+1. **Reproduzir.** `qa-adversarial` escreve o teste que expõe o comportamento atual e o deixa
+   vermelho. Sem teste vermelho, o diagnóstico é chute. Ele aponta de quem é o conserto e não
+   conserta nada.
+2. **Corrigir.** O agente dono da área conserta — **sem tocar no teste**. Não é desconfiança,
+   é higiene: quem faz passar não pode afrouxar a prova. Se a correção exigir coluna, CHECK ou
+   função, `banco-e-migracoes` vem antes (P3).
+3. **Registrar.** `escriba` abre a entrada em `docs/inconsistencias.md` no formato do I-24:
+   sintoma, causa, **o que o banco não pegou**, correção, pendência, lição. A terceira pergunta
+   é a mais valiosa — quando um defeito passa, ou faltou constraint ou faltou política, e a
+   resposta previne a próxima família inteira.
+4. **Revisar.** `revisor-de-fronteiras` dá o parecer contra fronteiras, princípios e decisões.
+5. **Fechar.** `make gate` verde, commit, push.
+
+### Roteamento por sintoma
+
+| O que se vê | Dono |
+|---|---|
+| Número, situação, fatura, parcela ou saldo errados | `dominio-lancamento` |
+| Vejo dado que não é meu, ou não vejo o que é meu | `banco-e-migracoes` (é RLS) |
+| Deslogou sozinho, token, troca de ambiente, convite | `identidade-e-sessao` |
+| Mensagem de erro errada, código HTTP estranho, campo faltando na resposta | `api-e-contrato` |
+| Tela não atualiza, formulário rejeita o que foi digitado | `frontend-web` |
+| Container, deploy no Pi, rede, build | `infra-e-implantacao` |
+
+Na dúvida, não escolha por palpite: descreva o sintoma e deixe o roteamento acontecer. Errar de
+agente custa uma rodada; errar de diagnóstico custa mais.
+
+### Proporção
+
+Cerimônia proporcional ao risco. Texto de botão, cor, alinhamento: conserta e commita. O fluxo
+completo é para defeito de **comportamento** — dinheiro, visibilidade, sessão, dado gravado.
+
+### A separação que não pode relaxar
+
+Corrigir e testar não são do mesmo agente, na mesma conversa. Quem está fazendo passar tem
+incentivo silencioso a escrever o teste que passa. Por isso `qa-adversarial` não toca em
+produção e quem corrige não toca no teste. É a única parte deste arranjo que, se afrouxar,
+some sem fazer barulho.
