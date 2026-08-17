@@ -21,6 +21,7 @@ superada, vai para a seção de Revisões com o motivo.
 | P1 | Nenhuma entidade guarda saldo, total ou agregado. O lançamento é a fonte única de verdade; todo saldo é calculado. |
 | P2 | Valor no banco == `name()` do enum Java. Sem campo paralelo, sem conversor. |
 | P3 | Migração primeiro, código depois. O banco aprende o valor novo antes do Java enviá-lo. |
+| P4 | O ambiente é a fronteira de dados, e o filtro dela não depende de ninguém lembrar. Isolamento no banco (RLS + identidade de sessão por aspecto), nunca num `where` escrito à mão. |
 
 ## Arquitetura
 

@@ -15,6 +15,8 @@ Todo endpoint fora de `/api/auth/**` exige `Authorization: Bearer <token de aces
 ### O ambiente é implícito
 Nenhum endpoint recebe `ambienteId` no corpo ou na query. O ambiente vem do token de acesso, e trocá-lo é `POST /api/sessao/ambiente` (B-T7). Consequência direta em `POST /api/lancamentos`: o lançamento nasce no ambiente ativo, mesmo em conta compartilhada (B-D2).
 
+**Uma exceção, explícita: `POST /api/convites/{id}/aceitar` recebe `ambienteId` no corpo** (B-D90, §2d). Não é furo na regra — é o próprio ponto do endpoint: só quem aceita pode escolher em qual dos ambientes dela a conta vai aparecer, e um valor padrão (o ambiente ativo) seria a escolha silenciosa que B-D90 recusou. Qualquer endpoint novo que "precise" de `ambienteId` no corpo tem que se justificar contra essa decisão, não citar este como precedente solto.
+
 ### Dinheiro é string
 Valores monetários trafegam como **string** (`"450.00"`), nunca como número JSON. Número em JSON é `double` no JavaScript, e `double` para dinheiro é proibido por F1 — mandar número seria abrir na borda o buraco que o modelo fechou no banco. O cliente converte para decimal; o servidor lê como `BigDecimal`.
 
@@ -38,7 +40,9 @@ Categoria e subcategoria **arquivam** (B-D4); conta **encerra** (F7); lançament
 | `POST` | `/api/auth/renovar` | Rotação atômica (B-T3). Aceita `ambienteId` opcional e o preserva (B-T6) |
 | `POST` | `/api/auth/logout` | Revoga só a família da sessão atual — este dispositivo (B-T5) |
 | `POST` | `/api/auth/logout-todos` | Revoga todas as famílias do usuário |
-| `GET` | `/api/perfil` | Usuário, ambiente atual, canal, ambientes visíveis (filtrados por RLS). Devolve `telegramId` desde a V18, **somente leitura** |
+| `GET` | `/api/perfil` | Usuário, ambiente atual, canal, ambientes visíveis (filtrados por RLS). Devolve `telegramId` desde a V18 |
+| `PUT` | `/api/perfil/nome` | Troca o nome de exibição (B-D71) |
+| `PUT` | `/api/perfil/senha` | Troca a senha, exigindo a atual (B-D72) |
 | `POST` | `/api/sessao/ambiente` | Troca o ambiente ativo. **403** se não houver vínculo (B-T7) |
 
 ### `POST /api/auth/cadastro` — o campo `telegramId` (V18, 29/07/2026)
@@ -53,6 +57,27 @@ Categoria e subcategoria **arquivam** (B-D4); conta **encerra** (F7); lançament
 - **409** quando o mesmo Telegram já está em outra conta — duas contas apontando para o mesmo destino fariam o bot não saber para quem lançar.
 - **A validação é frouxa de propósito:** aceita o id numérico (`123456789`) e o usuário (`@abner`). O bot ainda não existe, e uma regra apertada agora tem chance de barrar justamente o valor certo; enquanto não há consumidor, valor errado não causa dano. Quando o bot chegar, ele aperta com a forma que exigir.
 - **Não existe caminho de edição ainda.** `GET /api/perfil` devolve o valor para conferência, e nada mais. Fica registrado como pendência pequena: quem digitar errado hoje não tem como corrigir sozinho.
+
+### `PUT /api/perfil/nome`
+```json
+{ "nome": "Abner" }
+```
+Troca só o **nome de exibição** (B-D71). **O e-mail não tem endpoint de troca**, e a ausência é a proteção: é ele que faz login, e enquanto não existir recuperação de senha, um e-mail digitado errado trancaria a pessoa para fora da própria conta sem volta. Resposta: o mesmo corpo de `GET /api/perfil`, já atualizado.
+
+### `PUT /api/perfil/senha`
+```json
+{ "senhaAtual": "...", "senhaNova": "..." }
+```
+Exige a senha **atual** — sem ela, quem sentasse numa máquina com a sessão aberta tomaria a conta. **403** quando a atual não confere, com a mesma mensagem enxuta do login. Sucesso: **204**, sem corpo.
+
+**Troca a senha e derruba as OUTRAS sessões** (B-D72). É o comportamento certo pelo motivo oposto ao do 403: se a troca aconteceu porque a senha vazou, deixar as antigas vivas manteria o invasor dentro. Quem trocou continua logado nesta sessão.
+
+### Códigos de erro desta seção
+
+| Código | Quando |
+|---|---|
+| `400` | `nome` vazio ou maior que 120 caracteres; `senhaAtual`/`senhaNova` ausentes; `senhaNova` com menos de 10 caracteres |
+| `403` | `senhaAtual` incorreta |
 
 ---
 
@@ -420,7 +445,7 @@ conta "Nubank"  (ATIVO, não-física)        ← já existe hoje
 
 O **cartão é o contrato**, e é ele quem tem limite, vencimento e fatura (F18). O **emitido** é cada plástico ou virtual. A **fatura é do contrato** e engloba todos os emitidos dele.
 
-O cartão **também é uma conta** `PASSIVO` (B-D47): a dívida é soma de lançamentos, nunca coluna (P1), e por isso ele aparece na listagem de contas junto das outras — e o patrimônio já o subtrai sozinho.
+O cartão **também é uma conta** `PASSIVO` (B-D47): a dívida é soma de lançamentos, nunca coluna (P1). **Mas ele NÃO aparece em `GET /api/contas`** (B-D62, revisão de 28/07/2026): *"tratar o cartão de crédito como um banco confunde"*. O recorte fica no repositório (`bancariasDoAmbiente`, que exclui toda conta que tem `Cartao`), e não em cada tela — a dívida continua no patrimônio e aparece inteira em `GET /api/cartoes`.
 
 ### `POST /api/cartoes`
 ```json
@@ -452,6 +477,26 @@ O cartão **também é uma conta** `PASSIVO` (B-D47): a dívida é soma de lanç
 
 `limiteConsumido` inclui **parcelas futuras**. Elas já existem como lançamentos desde a compra (F23), com data futura — então entram pelo `saldoComPrevistos` e não pelo `saldo` (B-D26). Comprar 10x de R$ 100 derruba o disponível em R$ 1.000 na hora, como no app do banco.
 
+### `PUT /api/cartoes/{id}` · `PUT /api/cartoes/{id}/ciclo` · `POST /api/cartoes/{id}/encerrar` · `POST /api/cartoes/{id}/reabrir`
+
+```json
+{ "nome": "Black", "limite": "12000.00" }
+```
+
+`PUT /{id}` renomeia o contrato e altera o limite — nada mais. Endpoint próprio e não um campo genérico de contrato porque renomear nunca falha, enquanto mexer no ciclo mexe em faturas (ver abaixo); juntar os dois faria uma correção de nome arrastar consequência que ninguém pediu.
+
+```json
+{ "diaVencimento": 20, "diasParaFechamento": 7 }
+```
+
+`PUT /{id}/ciclo` muda vencimento e fechamento, e **regera somente as faturas futuras** — o passado não se reescreve. `diasParaFechamento` ausente cai no padrão de 5 (B-D49).
+
+`POST /{id}/encerrar` **não exige dívida zero** e **cancela todos os emitidos em cascata** (B-D65). Ao contrário de encerrar uma conta comum (F7), a dívida do cartão não muda de número nenhum — as parcelas futuras continuam chegando e as faturas continuam pagáveis. O que encerrar faz é impedir compra nova, e por isso o cartão some da lista de meios de pagamento.
+
+`POST /{id}/reabrir` devolve o contrato à lista de meios de pagamento, mas **não reativa os emitidos** (B-D65): ressuscitar em massa devolveria à vida um virtual que a pessoa descartou de propósito — virtual é feito para ser descartado. Reativar plástico é `POST /{id}/emitidos/{emitidoId}/reativar`, um a um.
+
+As quatro respostas voltam na mesma forma do `GET /api/cartoes/{id}`.
+
 ### `POST /api/cartoes/{id}/emitidos`
 ```json
 { "nomeTitular": "Luciana", "tipo": "FISICO", "finalDoCartao": "5678", "limiteProprio": null }
@@ -460,6 +505,10 @@ O cartão **também é uma conta** `PASSIVO` (B-D47): a dívida é soma de lanç
 `nomeTitular` é **texto livre** e `usuarioId` fica nulo (B-D53): convidar usuário é o I-08, que não existe ainda. Você registra o adicional hoje e vê os gastos dela separados; quando o convite chegar, preenche-se o vínculo e nada mais muda.
 
 `limiteProprio` nulo significa "usa o limite do contrato" — o caso comum.
+
+### `POST /api/cartoes/{id}/emitidos/{emitidoId}/cancelar` · `POST /api/cartoes/{id}/emitidos/{emitidoId}/reativar`
+
+Cancelar **um** plástico não exige matar o contrato inteiro — é a tela de cartões agrupando por banco → contrato → emitidos (B-D66), com botão próprio em cada emitido. `reativar` desfaz o cancelamento individual; não confundir com `POST /{id}/reabrir`, que **não** ressuscita emitidos cancelados em massa (B-D65). Ambos respondem na forma do `GET /api/cartoes/{id}`.
 
 ### `GET /api/cartoes/{id}/faturas?ano=2026`
 
@@ -481,6 +530,10 @@ Por que separado: **uma fatura ABERTA pode estar PARCIALMENTE paga**. É o caso 
 > **O I-07 fecha aqui** (B-D52). Ele estava aberto desde o modelo lógico porque faltava confirmar se pagamento parcial existia. Existe, e antes do fechamento também.
 
 Faturas são **pré-geradas 12 meses à frente** (F20), para o parcelamento ter onde cair.
+
+### `GET /api/faturas/{id}`
+
+Mesma forma de cada item de `GET /api/cartoes/{id}/faturas`, para uma fatura só. Existe porque as escritas desta seção (`fechar`, `reabrir`, `pagamentos`) precisam devolver a fatura com os números recalculados, e ler uma de cada vez é o caminho — abrir a tela de uma fatura específica não deveria custar buscar o ano inteiro.
 
 ### `POST /api/faturas/{id}/fechar` · `POST /api/faturas/{id}/reabrir`
 
@@ -723,7 +776,9 @@ Os convites de conta pendentes **para mim**. A tela mostra isso onde a pessoa en
 
 **O `ambienteId` é obrigatório e é o ponto do aceite** (B-D90). Cair no ambiente ativo mandaria a conta doméstica para o PJ sem aviso, e os gastos iriam para o mapa errado até alguém notar — e notar é difícil, porque nada avisa.
 
-**404** para convite que não é dela, e **404** também para ambiente que não é dela ou onde ela não é dona — pelo idioma de B-D25, que já valia no §2c: ambiente alheio é indistinguível de ambiente inexistente, e distinguir transformaria a API num oráculo sobre quais ids existem. **400** fica para `ambienteId` ausente ou malformado. Sucesso: **201** com a conta, já no formato de `GET /api/contas`.
+**404** para convite que não é dela, e **404** também para ambiente que não é dela ou onde ela não é dona — pelo idioma de B-D25, que já valia no §2c: ambiente alheio é indistinguível de ambiente inexistente, e distinguir transformaria a API num oráculo sobre quais ids existem. **400** fica para `ambienteId` ausente ou malformado.
+
+Sucesso: **201** com um corpo mínimo, `{ "contaId": "0198...", "ambienteId": "0198..." }` — **não** a conta no formato de `GET /api/contas`. A conta acabou de entrar num ambiente em que a pessoa **não está** (o ativo da sessão pode ser outro), e montar a resposta completa exigiria simular um ambiente que a requisição não está vivendo. A tela troca para o ambiente escolhido e recarrega a lista de contas de lá.
 
 Aceitar dentro de um ambiente que ela **recebeu emprestado** (§2c) é recusado junto: espalharia a conta para o dono daquele ambiente, que não participou de nada disto.
 

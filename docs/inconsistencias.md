@@ -517,6 +517,43 @@ vez de mudar um total em silêncio.
 
 ---
 
+# Achados da auditoria de fronteiras de 16/08/2026
+
+## I-30 — Outbox alimentada desde a V10, sem relay que a consuma
+
+**O que já ficou decidido.** A09 promete "padrão Outbox para eventos entre módulos; relay em
+processo agora, Redpanda na Fase 8; produtor não muda". F28 promete "Outbox alimentado desde
+o primeiro lançamento, com relay em processo". As duas decisões seguem vigentes — a escrita do
+evento na mesma transação da operação, que é o ponto do padrão, está correta e implementada
+desde a V10 (`fn_publicar_evento_lancamento`).
+
+**O que o repositório faz hoje.** Só a metade produtora existe. O gatilho grava um evento a
+cada lançamento criado, alterado ou excluído, e a tabela `outbox` cresce. Não existe a outra
+ponta: `EventoOutbox` (`raspybank-auditoria/src/main/java/com/raspybank/auditoria/dominio/EventoOutbox.java`)
+não tem repositório Spring Data, não há `@Scheduled` em lugar nenhum do código (`grep -r
+"@Scheduled"` no repositório inteiro não encontra nada), e nada lê a tabela, publica os
+eventos ou marca `publicado_em`. "Relay em processo agora" descreve uma intenção registrada
+antes de existir — não o estado do código.
+
+**Por que nada quebra por enquanto.** Ninguém consome eventos: não há contexto extraído para
+processo próprio, nem bot, nem qualquer outro leitor esperando a fila. A fronteira entre
+módulos (A02, policiada por `ArquiteturaTest`) não depende do relay para existir — ela vem do
+isolamento de módulo Maven e do ArchUnit, e continua garantida com ou sem consumidor. A tabela
+apenas acumula linhas não publicadas indefinidamente, sem consequência visível hoje: nenhuma
+tela lê `outbox`, nenhum saldo ou relatório depende dela.
+
+**O que ainda não tem decisão.** Quando o primeiro consumidor precisar existir — extração de
+um contexto para processo próprio, ou o bot do Telegram reagindo a lançamento —, alguém decide
+se o relay é mesmo "em processo" (thread ou `@Scheduled` dentro do próprio `raspybank-app`,
+como A09 já antecipa) ou se compensa pular direto para mensageria. Também fica em aberto se a
+tabela cresce sem limite até lá, ou se ganha alguma purga/arquivamento antes de ter leitor.
+
+**Quando resolver:** no início da extração do primeiro contexto para processo separado, ou
+antes disso se surgir o primeiro consumidor de eventos (ex.: bot do Telegram). Nenhum uso
+atual depende do relay, então nada bloqueia por causa deste item.
+
+---
+
 # Situação em 26/07/2026
 
 **Resolvidos:** I-01, I-02, I-03, I-05, I-09, I-10, I-11, I-12, I-14, I-15, I-16, I-17, I-19, I-20, I-21, I-22.

@@ -22,6 +22,26 @@
 | P1 | **Nenhuma entidade guarda saldo, total ou agregado.** O lançamento é a fonte única de verdade; todo saldo é calculado. Não há o que reconciliar quando o dado não existe em dois lugares. |
 | P2 | **Valor no banco == name() do enum Java.** Sem campo paralelo, sem conversor. A conversão enum→texto existe num único ponto por fluxo, na borda com o banco. (Fechado no Bloco A, 23/07.) |
 | P3 | **Migração primeiro, código depois.** O banco aprende o valor novo antes do Java enviá-lo. Na ordem inversa, existe uma janela em que o código grava valor que o CHECK rejeita. |
+| P4 | **O ambiente é a fronteira de dados, e o filtro dela não depende de ninguém lembrar.** Todo dado financeiro pertence a exatamente um ambiente, e ninguém alcança dado de ambiente com o qual não tem vínculo. O isolamento vive no banco — política de RLS mais a identidade de sessão aplicada por aspecto — e nunca num `where` que o desenvolvedor precisa escrever, porque filtro que se escreve à mão é filtro que um dia se esquece. (Registrado em 16/08/2026 — ver nota abaixo.) |
+
+> **Nota sobre o P4 (16/08/2026).** O princípio é citado pela V1, pela V3, por
+> `ConfiguradorSessaoRls`, `ContextoRequisicao`, `CategoriaControlador` e `Ambiente` desde a
+> fundação, com as referências `RF-M2-01` e `RF-M2-06` da sessão de requisitos de 20/07 —
+> mas nunca havia entrado neste documento. Uma auditoria de fronteiras o encontrou:
+> seis arquivos apoiando um argumento numa referência que a fonte de verdade não tinha.
+> O texto acima registra o que o código já pratica; não muda comportamento nenhum.
+>
+> Duas precisões que a formulação de 20/07 não podia ter:
+> - **O tenant do RLS é o usuário, não o ambiente** (A08). O ambiente é a fronteira do
+>   *dado*; o usuário é o eixo da *política*. As duas coisas convivem — é por vínculo que
+>   se decide o que cada um vê, não por igualdade de campo.
+> - **Vínculo explícito estende a visibilidade, e isso não fere o P4** (§4j, §4k, §4n).
+>   Uma conta continua pertencendo a exatamente um ambiente — a `origem` em
+>   `conta_ambiente` — e aparece em outro só quando alguém aceitou um convite. O que o
+>   P4 proíbe é alcance sem vínculo, não compartilhamento consentido.
+>
+> O texto das migrações V1 e V3 fica como está: migração aplicada não se edita, nem no
+> comentário — o checksum do Flyway não distingue comentário de comando.
 
 # 2. Decisões de fundação (Fase 0 / Fase 4)
 

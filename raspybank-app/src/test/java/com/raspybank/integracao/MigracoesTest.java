@@ -5,14 +5,12 @@ import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * As migracoes aplicaram, e deixaram o banco no estado que a documentacao
@@ -27,7 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>o inventario de funcoes SECURITY DEFINER ({@code docs/security-definer.md})
  *       confere com o banco real — funcao a mais e furo sem registro, funcao a
  *       menos e documentacao mentindo;</li>
- *   <li>RLS esta LIGADO em todas as tabelas que deveriam te-lo.</li>
+ *   <li>as tabelas com RLS ligado no banco sao exatamente as inventariadas aqui
+ *       — tabela a menos e politica que alguem desligou, tabela a mais e tabela
+ *       nova que nasceu sem ninguem conferir se a politica cobre o caso.</li>
  * </ul>
  */
 class MigracoesTest extends IntegracaoTest {
@@ -142,6 +142,11 @@ class MigracoesTest extends IntegracaoTest {
         // Dominio (V10). A regra da casa: tabela nova nasce com RLS ligado.
         // Tabela de dominio sem politica e tabela que qualquer usuario le inteira.
         "categoria", "subcategoria", "conta", "conta_ambiente", "lancamento",
+        // Forma de pagamento por conta (V11)
+        "conta_forma_pagamento",
+        // Cartao de credito (V12). A fatura nao guarda total (P1), mas guarda
+        // quais compras caem nela — e isso e extrato de quem gasta.
+        "cartao", "cartao_emitido", "fatura",
         // Compartilhamento de conta (V16) e de plastico (V19)
         "conta_convite", "cartao_emitido_ambiente");
 
@@ -189,19 +194,30 @@ class MigracoesTest extends IntegracaoTest {
     }
 
     @Test
-    @DisplayName("RLS ligado nas onze tabelas: cinco da fundacao, cinco do dominio, o convite")
+    @DisplayName("Tabelas com RLS ligado no banco == inventario do repositorio")
     void rlsLigadoNasTabelas() throws SQLException {
         try (Connection c = comoProprietario();
-             PreparedStatement ps = c.prepareStatement(
-                 "SELECT relrowsecurity FROM pg_class WHERE relname = ?")) {
+             Statement s = c.createStatement();
+             ResultSet rs = s.executeQuery("""
+                 SELECT c.relname
+                   FROM pg_class c
+                   JOIN pg_namespace n ON n.oid = c.relnamespace
+                  WHERE n.nspname = 'public'
+                    AND c.relkind = 'r'
+                    AND c.relrowsecurity
+                  ORDER BY c.relname""")) {
 
-            for (String tabela : TABELAS_COM_RLS) {
-                ps.setString(1, tabela);
-                try (ResultSet rs = ps.executeQuery()) {
-                    assertTrue(rs.next(), "Tabela nao encontrada: " + tabela);
-                    assertTrue(rs.getBoolean(1), "RLS DESLIGADO em: " + tabela);
-                }
+            var noBanco = new java.util.ArrayList<String>();
+            while (rs.next()) {
+                noBanco.add(rs.getString(1));
             }
+
+            assertEquals(
+                TABELAS_COM_RLS.stream().sorted().toList(),
+                noBanco,
+                "Divergencia entre a lista deste teste e o banco. Tabela a menos e "
+                + "RLS que alguem desligou; tabela a mais e tabela nova que entrou "
+                + "sem passar por aqui — e a segunda e a que some em silencio.");
         }
     }
 }
