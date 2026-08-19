@@ -98,6 +98,7 @@ mais o teste de integração correspondente.
 | `docs/inconsistencias.md` | Pendências e achados conhecidos (I-01…), com estado. |
 | `docs/security-definer.md` | Inventário das funções SECURITY DEFINER e por que cada uma existe. |
 | `docs/mapa-telas.md` | Telas e o que cada uma consome. |
+| `docs/desenho-*.md` | Desenho ainda **não decidido** e não implementado. Não é fonte de verdade; vira decisão só ao entrar em `decisoes.md`, no commit que o implementa. |
 
 ## Agentes
 
