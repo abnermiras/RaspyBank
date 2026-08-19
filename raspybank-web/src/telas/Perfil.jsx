@@ -96,6 +96,17 @@ export default function Perfil() {
             }
           />
 
+          <FormularioDeTelegram
+            telegramAtual={eu.telegramId ?? ''}
+            ocupado={ocupado}
+            aoGravar={(telegramId) =>
+              executar(
+                () => apiPerfil.alterarTelegram(telegramId),
+                telegramId ? 'Telegram atualizado.' : 'Telegram removido do seu cadastro.',
+              )
+            }
+          />
+
           <FormularioDeSenha
             ocupado={ocupado}
             aoGravar={(atual, nova) =>
@@ -199,6 +210,57 @@ function FormularioDeNome({ nomeAtual, ocupado, aoGravar }) {
       <div className="acoes-linha">
         <button type="submit" className="botao-principal botao-pequeno" disabled={ocupado}>
           Salvar nome
+        </button>
+      </div>
+    </form>
+  )
+}
+
+/**
+ * O Telegram, que até aqui só entrava no cadastro.
+ *
+ * O campo NÃO é `required`, e a ausência é o ponto: apagar o conteúdo e salvar
+ * limpa o valor. Quem digitou o usuário errado não tinha caminho de volta —
+ * o cadastro só acontece uma vez.
+ *
+ * Vocabulário igual ao da tela de cadastro de propósito: são o mesmo campo, e
+ * dois nomes diferentes fariam parecer que são duas coisas.
+ */
+function FormularioDeTelegram({ telegramAtual, ocupado, aoGravar }) {
+  return (
+    <form
+      className="bloco-perfil"
+      onSubmit={(e) => {
+        e.preventDefault()
+        // Aparado: espaço em branco é ausência, não identidade.
+        aoGravar(new FormData(e.target).get('telegramId').trim())
+      }}
+    >
+      <h3>Alterar Telegram</h3>
+      <div className="campos-lado-a-lado">
+        <label>
+          Telegram (opcional)
+          {/* defaultValue e não placeholder: vazio no servidor é campo vazio. */}
+          <input
+            name="telegramId" maxLength={64} autoComplete="off"
+            placeholder="@seu_usuario" defaultValue={telegramAtual}
+          />
+        </label>
+      </div>
+
+      <p className="dica">
+        Seu usuário ou o id numérico. Serve para o bot saber quem está
+        lançando — deixe em branco se ainda não usa.
+      </p>
+
+      <p className="dica">
+        Digitou errado? <strong>Apague o campo e salve</strong>: o valor é
+        limpo e o bot deixa de reconhecer você.
+      </p>
+
+      <div className="acoes-linha">
+        <button type="submit" className="botao-principal botao-pequeno" disabled={ocupado}>
+          Salvar Telegram
         </button>
       </div>
     </form>

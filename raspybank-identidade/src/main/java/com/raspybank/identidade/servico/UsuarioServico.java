@@ -52,4 +52,27 @@ public class UsuarioServico {
         u.renomear(nome);
         return u;
     }
+
+    /**
+     * Grava o telegramId digitado pela propria pessoa.
+     *
+     * <p><b>Nao ha verificacao de posse</b>, e isso e decisao, nao esquecimento:
+     * sem pareamento com o bot — que ainda nao existe — nao ha o que verificar.
+     * Quem digitar errado nao recebe mensagem, e o custo disso e dela.</p>
+     *
+     * <p>Branco vira <b>NULL</b>, nunca string vazia. O motivo esta no banco:
+     * {@code ux_usuario_telegram} e indice unico <i>parcial</i>
+     * ({@code WHERE telegram_id IS NOT NULL}), entao {@code ''} seria um valor
+     * real para ele — a segunda pessoa que limpasse o campo colidiria com a
+     * primeira. E o mesmo {@code NULLIF(btrim(...), '')} que a V18 faz no
+     * cadastro, so que aqui o UPDATE e direto e o equivalente mora no Java.</p>
+     */
+    @Transactional
+    public Usuario definirTelegramId(UUID usuarioId, String telegramId) {
+        Usuario u = buscar(usuarioId);
+
+        String valor = telegramId == null ? null : telegramId.trim();
+        u.setTelegramId(valor == null || valor.isEmpty() ? null : valor);
+        return u;
+    }
 }

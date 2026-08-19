@@ -20,6 +20,16 @@ export const perfil = {
   alterarNome: (nome) => pedirComRenovacao('/api/perfil/nome', json('PUT', { nome })),
 
   /**
+   * String vazia LIMPA o vínculo, e é caminho de primeira classe: é por onde
+   * quem digitou errado desfaz. Por isso nada aqui recusa `''`.
+   *
+   * Pode responder 409 — o Telegram já está em outra conta — com a frase no
+   * corpo, que a tela mostra sem reescrever.
+   */
+  alterarTelegram: (telegramId) =>
+    pedirComRenovacao('/api/perfil/telegram', json('PUT', { telegramId })),
+
+  /**
    * Exige a senha atual, e derruba as OUTRAS sessões.
    *
    * Se a troca aconteceu porque a senha vazou, deixar as antigas vivas manteria

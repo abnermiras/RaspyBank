@@ -167,8 +167,9 @@ class AutenticacaoFluxoTest extends IntegracaoTest {
         assertEquals(ambienteId, String.valueOf(ambientes.get(0).get("id")));
 
         // O que foi preenchido no cadastro volta na leitura. Sem isto, quem
-        // digitou o Telegram nao tem como conferir o que ficou gravado — e nao
-        // existe caminho de edicao ainda.
+        // digitou o Telegram nao tem como conferir o que ficou gravado. Desde a
+        // R10 (18/08/2026) existe caminho de edicao — PUT /api/perfil/telegram —
+        // e este teste continua guardando a leitura logo apos o cadastro.
         assertEquals(telegram, resposta.getBody().get("telegramId"));
     }
 

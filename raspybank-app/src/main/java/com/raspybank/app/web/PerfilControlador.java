@@ -9,6 +9,7 @@ import com.raspybank.identidade.servico.AutenticacaoServico;
 import com.raspybank.shared.erro.OperacaoNaoPermitida;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -66,6 +67,30 @@ public class PerfilControlador {
     }
 
     /**
+     * Grava o telegramId que a pessoa digitou.
+     *
+     * <p><b>Sem pareamento e sem prova de posse</b>, e isso e decisao tomada:
+     * o bot ainda nao existe, entao nao ha com quem confirmar nada. Valor
+     * errado nao causa dano — so nao recebe mensagem.</p>
+     *
+     * <p>Campo em branco <b>limpa</b> o vinculo (vira NULL no banco), e isso e
+     * requisito, nao efeito colateral: sem ele nao ha como desfazer um valor
+     * digitado errado.</p>
+     *
+     * <p><b>409</b> quando o valor ja pertence a outra conta — quem responde e
+     * o {@code TratadorGlobalDeErros}, que reconhece {@code ux_usuario_telegram}.
+     * A checagem e do banco de proposito: fazer um SELECT antes seria corrida,
+     * e a RLS nem deixaria enxergar a linha alheia para comparar.</p>
+     */
+    @PutMapping("/telegram")
+    public Map<String, Object> alterarTelegramId(@Valid @RequestBody PedidoTelegram pedido) {
+        UUID usuarioId = ContextoRequisicao.usuarioId().orElseThrow();
+
+        usuarios.definirTelegramId(usuarioId, pedido.telegramId());
+        return perfil();
+    }
+
+    /**
      * Troca a senha, exigindo a atual.
      *
      * <p>Responde <b>403</b> quando a atual nao confere, e a mensagem nao diz
@@ -95,6 +120,24 @@ public class PerfilControlador {
         String nome
     ) {}
 
+    /**
+     * @param telegramId opcional, e em branco significa <b>limpar</b>. A regra e
+     *                   copia literal da do cadastro
+     *                   ({@code AutenticacaoControlador.PedidoCadastro}), com as
+     *                   mesmas mensagens: duas bordas que aceitam o mesmo campo
+     *                   com criterios diferentes viram um defeito onde a pessoa
+     *                   cadastra um valor e depois nao consegue reeditar o
+     *                   proprio valor. Frouxa porque o bot ainda nao existe e
+     *                   ninguem sabe se ele vai querer o id numerico ou o
+     *                   usuario — apertar isso e tarefa de quem escrever o bot.
+     */
+    public record PedidoTelegram(
+        @Size(max = 64, message = "telegramId pode ter no maximo 64 caracteres")
+        @Pattern(regexp = "|@?[A-Za-z0-9_]{3,63}",
+                 message = "telegramId aceita numeros, letras, _ e um @ na frente")
+        String telegramId
+    ) {}
+
     public record PedidoSenha(
         @NotBlank(message = "senhaAtual e obrigatoria")
         String senhaAtual,
@@ -114,9 +157,9 @@ public class PerfilControlador {
         resposta.put("email", eu.getEmail());
         resposta.put("criadoEm", eu.getCriadoEm());
 
-        // Somente leitura, e de proposito: o valor entra no cadastro (V18) e
-        // ainda nao ha caminho de edicao. Mostra-lo e o minimo honesto — sem
-        // isto, quem preencheu nao tem como conferir o que foi gravado.
+        // Editavel desde 18/08/2026 por PUT /api/perfil/telegram, que devolve
+        // este mesmo mapa — a tela le e escreve o campo pelo mesmo formato, sem
+        // precisar recarregar o perfil depois de salvar.
         resposta.put("telegramId", eu.getTelegramId());
 
         resposta.put("usuarioId", ContextoRequisicao.usuarioId().orElse(null));
