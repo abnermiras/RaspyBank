@@ -618,6 +618,123 @@ validação de borda.
 
 ---
 
+# Achados da investigação de 19/08/2026 — exclusão de parcela em produção
+
+## I-33 — Excluir uma parcela deixa o grupo de parcelamento incoerente
+
+### O relato (que não se sustentou)
+
+Relato do usuário: *"parcela 2/2 duplicada"*. Investigado com consultas de diagnóstico
+direto na base de **produção** (o Pi), em 19/08/2026. **Não há duplicação nenhuma** — a
+varredura por par `(grupo_parcelamento_id, parcela_numero)` repetido veio vazia na base
+inteira.
+
+O que o usuário viu na fatura de outubro foram duas linhas `2/2` de R$ 105,79 em
+05/10/2026, na mesma fatura — mas são **duas compras distintas** ("Petlove - internação
+Buzina" e "Petlove - internação Bubu", dois pets), cada uma parcelada em 2x, com mesmo
+valor no mesmo dia. É o mesmo padrão do I-24: o relato chegou com a causa embutida, e a
+causa era outra. Reforça a regra do CLAUDE.md — o relato é sintoma, não diagnóstico.
+
+### O que a base mostra
+
+Dois grupos de parcelamento com `parcela_total = 2` e **apenas 1 linha** cada:
+`34ebbe5e-6a2f-4d79-b3dc-19b25d4bd4b7` e `3b300e3f-5af5-4f08-a2a1-6007890a0003`. As
+sobreviventes (as parcelas `2/2`), ambas R$ 105,79, `data_caixa` 2026-10-05, na fatura
+`4b4089a3`: `744c0ce6` ("Buzina") e `351a6f23` ("Bubu").
+
+A trilha em `registro_auditoria` confirma que cada compra nasceu numa transação só
+(`criado_em` idêntico ao microssegundo entre a parcela 1 e a 2 — F23), o que descarta
+envio duplicado:
+
+```
+15:03:28.059131  CRIACAO   a63477d5  ┐ mesma transação (compra Buzina)
+15:03:28.059131  CRIACAO   744c0ce6  ┘
+15:03:55.664503  CRIACAO   351a6f23  ┐ mesma transação (compra Bubu)
+15:03:55.664503  CRIACAO   a13e1f33  ┘
+15:04:32         CRIACAO   b68c5cd8    (Amazon PetFarmacia, não parcelado)
+15:05:14         EXCLUSAO  b68c5cd8
+15:05:16         EXCLUSAO  a13e1f33    (parcela 1/2 de Bubu)
+15:05:18         EXCLUSAO  a63477d5    (parcela 1/2 de Buzina)
+```
+
+As três linhas excluídas tinham `data_caixa` 2026-09-05 — a fatura de setembro. Foram
+exclusões **individuais e deliberadas**, com 2 segundos de intervalo entre elas; a hipótese
+em aberto é mau uso — o usuário quis limpar a fatura de setembro e não percebeu que estava
+partindo compras parceladas ao meio. O `estado_anterior` da auditoria guarda os 23 campos
+de cada linha apagada, então a reconstrução fiel é possível.
+
+### A causa
+
+`LancamentoServico.excluir` (`raspybank-lancamento/src/main/java/com/raspybank/lancamento/servico/LancamentoServico.java:612-613`)
+apaga o lançamento e nada mais. Nenhuma menção ao grupo. Tira-se uma parcela de um grupo de
+duas e sobra uma linha declarando `2/2` num grupo que só tem uma linha.
+
+O javadoc do método, logo acima dele, afirma o contrário em voz alta:
+
+> Pode, porque nada aponta para ele: apagar um lancamento nao deixa nenhuma outra linha
+> orfa, e o saldo simplesmente volta a ser a soma do que restou.
+
+Era verdade na V10 e **deixou de ser na V12**: o `grupo_parcelamento_id` é uma linha
+apontando para outra. O comentário nunca foi revisitado quando o cartão chegou, e hoje ele
+autoriza exatamente a operação que quebra a invariante. Isso é parte do achado, não
+detalhe — comentário que afirma uma garantia envelhece junto com o modelo, e um comentário
+desatualizado que autoriza a operação errada é pior que nenhum comentário.
+
+B-D55 assumiu esse custo por escrito: *"o `grupo_parcelamento_id` não tem tabela-alvo,
+então não há FK garantindo o grupo — é identificador de correlação, e a integridade dele
+fica na aplicação"*. A aplicação não a mantém. Este achado é a fatura desse custo chegando.
+
+### O que o banco não pegou
+
+Nada — e não por descuido. O `CHECK` da V12
+(`raspybank-app/src/main/resources/db/migration/V12__cartao_de_credito.sql:292-296`) valida
+a coerência do **trio dentro de uma linha** (grupo/número/total juntos, ou todos nulos). O
+índice `ix_lancamento_grupo_parcelamento` (mesma migração, linhas 299-300) **não é único** —
+não precisaria ser, várias linhas do mesmo grupo são o desenho normal. A invariante violada
+é **entre linhas** (`count(*) do grupo == parcela_total`), e isso não cabe em `CHECK`: o
+Postgres não aceita subconsulta ali. Só gatilho pegaria. Se a garantia deve migrar para o
+banco (gatilho) ou ficar no serviço é parte da decisão em aberto.
+
+### A correção — em aberto, nada foi feito
+
+Nem código nem dado foram tocados. O usuário decidiu **pendurar o assunto**, e falta a
+decisão de produto:
+
+**Excluir a parcela `1/n` deve apagar o grupo inteiro, ou só a linha em tela?** As
+alternativas na mesa: apagar o grupo todo (com confirmação dizendo quantas linhas e quanto
+some), ou renumerar as sobreviventes (`2/2 → 1/1`). Renumerar reescreve o passado — passa a
+afirmar que a compra foi de R$ 105,79 em 1x quando foi de R$ 211,58 em 2x, e erra em
+silêncio o limite consumido, que existe para bater com o app do banco (B-D48).
+
+**A pergunta que trava a decisão**, levantada pelo usuário: o que apagar o grupo faz com a
+parcela que já foi paga? Ela tem âncora — B-D113 define "parcela paga" com precisão: a
+compra é `REALIZADO` se, e somente se, a fatura dela estiver fechada e quitada. Logo não é
+uma decisão só: é uma para parcelas em fatura aberta e outra para as que caíram em fatura
+já conferida contra o banco. Mexer no total de uma fatura quitada é o que B-D65 recusou em
+outro contexto (encerrar cartão não some com o passado).
+
+**Dado de produção:** os dois grupos órfãos continuam incoerentes no Pi. O conserto
+depende da intenção do usuário ao excluir (se era apagar as compras inteiras, apaga-se
+também as `2/2`; se era só limpar a fatura de setembro, recriam-se as `1/2` a partir do
+`estado_anterior`). É correção manual como `raspybank_owner`, **não** migração Flyway —
+Flyway é schema, não dado de uma instalação.
+
+### Estado
+
+Aberto, **sem dono e sem prazo** — pendurado por decisão do usuário em 19/08/2026. Quando
+for retomado, a ordem é: decisão registrada em `docs/decisoes.md` → `qa-adversarial` com o
+teste vermelho → `dominio-lancamento` (serviço e javadoc) → eventual gatilho por
+`banco-e-migracoes` → revisor → `make gate`.
+
+### A lição
+
+Duas, e as duas valem: (a) custo assumido em decisão ("a integridade fica na aplicação") é
+dívida com vencimento, não isenção — B-D55 previu exatamente este buraco e ninguém voltou
+para tapá-lo; (b) comentário que afirma uma garantia envelhece junto com o modelo, e
+comentário desatualizado que autoriza a operação errada é pior que comentário ausente.
+
+---
+
 # Situação em 26/07/2026
 
 **Resolvidos:** I-01, I-02, I-03, I-05, I-09, I-10, I-11, I-12, I-14, I-15, I-16, I-17, I-19, I-20, I-21, I-22.
