@@ -243,6 +243,10 @@ Duas ausências e dois nomes longos, todos deliberados:
 ### `GET /api/lancamentos?mes=2026-07`
 Filtro obrigatório por mês (sobre `dataCaixa`). Opcionais: `contaId`, `categoriaId`, `situacao`.
 
+`contaId` aceita também o **id de um cartão de crédito** (B-D115). Não é uma segunda semântica: o cartão **é** uma conta (B-D47, `cartao.conta_id` é PK e FK), então é a mesma igualdade sobre a mesma coluna. O `id` a passar é o que `GET /api/cartoes` devolve.
+
+A consequência precisa estar escrita, porque surpreende: uma **compra no cartão mora na conta do cartão**, não na do banco — o `POST` recebe o banco mais `cartaoEmitidoId`, e o servidor redireciona (B-D61). Logo, **filtrar por uma conta bancária não traz o que foi pago no cartão dela**, e isso é a igualdade funcionando, não omissão. Já filtrar pelo cartão devolve o que aquele cartão movimentou **no ambiente ativo** (B-D21) — as compras e a perna de entrada do pagamento da fatura (B-D59). Num cartão dividido isso é menos que o extrato do plástico, que mostra as compras de todos que têm acesso a ele (B-D110): o que a outra pessoa comprou foi lançado no ambiente dela. Quem precisa da soma que atravessa ambientes usa `GET /api/contas/{id}/extrato` (§2d, B-D87/B-D96).
+
 ```json
 {
   "lancamentos": [

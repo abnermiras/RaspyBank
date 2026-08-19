@@ -80,6 +80,7 @@ O formulário tem **cinco campos e mais nada**:
 - **Sem campo de ambiente** (B-D2): vem do ambiente ativo no topo, mesmo em conta compartilhada.
 - **Sem campo de status** (B-D9 / R9): data no passado ou hoje → `REALIZADO`; no futuro → `PREVISTO`. A lista mostra o status resultante e permite corrigir depois; o formulário não pergunta.
 - A lista de categorias exclui as arquivadas (B-D4) e inclui as sistêmicas que fazem sentido lançar à mão.
+- **Filtro: quatro seletores — conta, cartão, categoria, situação** (B-D115, 19/08/2026). Compra no cartão grava `contaId` = a conta do cartão (B-D61), e o seletor de conta lista só contas bancárias (B-D62) — sem o de cartão, quem gasta no cartão filtra por qualquer conta e vê a tela vazia, que foi exatamente o relato que originou a decisão. Os dois seletores escrevem no **mesmo** `filtros.contaId`: cada um só exibe o valor quando ele pertence à própria lista de opções, o que torna "conta X e cartão Y" um estado irrepresentável, não um estado proibido. Cartão compartilhado entra na lista com o dono no rótulo ("Black de Abner"), mesmo motivo de B-D112 — pode haver homônimo próprio. Sem cartão no ambiente, o seletor **some**, em vez de ficar desabilitado: com só a opção neutra ele não responde pergunta nenhuma.
 - **API: não existe — depende da V10.**
 
 ---
@@ -246,7 +247,7 @@ As quatro telas do mínimo aceitável existem. O que cada uma **recusou** fazer 
 
 **T-05 — Contas.** O `saldoComPrevistos` só aparece **quando difere** do `saldo`; repetido, o número viraria ruído. O formulário diz em texto que o saldo inicial vira um lançamento em `Ajuste`, em vez de fingir um campo mágico — o saldo continua sendo só a soma dos lançamentos.
 
-**T-08 — Lançamentos.** A tela **não reimplementa** as duas derivações. A situação é *mostrada* enquanto a pessoa escolhe a data ("nasce como previsto"), mas o campo só é enviado na edição, onde corrigir é legítimo. O campo `tipo` só aparece quando a categoria é `AMBOS` — o único caso em que o servidor não decide sozinho. Duplicar essas regras criaria uma segunda fonte da verdade, e a segunda é sempre a que envelhece.
+**T-08 — Lançamentos.** A tela **não reimplementa** as duas derivações. A situação é *mostrada* enquanto a pessoa escolhe a data ("nasce como previsto"), mas o campo só é enviado na edição, onde corrigir é legítimo. O campo `tipo` só aparece quando a categoria é `AMBOS` — o único caso em que o servidor não decide sozinho. Duplicar essas regras criaria uma segunda fonte da verdade, e a segunda é sempre a que envelhece. O filtro de cartão que a B-D115 acrescentou recusou o mesmo tipo de atalho: em vez de um `cartaoId` novo na API, ele escreve no `contaId` que já existia — o mesmo raciocínio, aplicado ao filtro em vez do formulário.
 
 **T-07 — Mapa de gastos.** Três blocos, doze colunas sempre, e o previsto numa segunda linha da célula, menor e noutra cor. A tela **nunca soma** realizado com previsto: é o B-D10 desenhado. As células são reordenadas por mês na chegada — o contrato promete doze, não promete ordem, e tabela de doze colunas montada fora de ordem erra em silêncio.
 

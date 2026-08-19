@@ -557,6 +557,22 @@ Verificada por `SituacaoDeCompraNoCartaoTest` (6 casos), que falha em 3 deles co
 |---|---|---|
 | B-D114 | **Nenhum campo de data da tela é preenchido com `toISOString()`.** O helper é `hojeISO()`, que usa os getters locais | `toISOString()` devolve UTC, e das 21h em diante em São Paulo ele abre o campo com **amanhã**. Um pagamento feito às 22h nascia com `data_caixa` do dia seguinte e, por B-D9, `PREVISTO` — a fatura ficava quitada com o próprio pagamento previsto. É a mesma armadilha que B-D8 já tinha resolvido no banco (`date` em vez de instante), escapada na tela. Achada como I-28, no formulário de pagamento da T-06, que era a **única** ocorrência no frontend |
 
+# 4r. O filtro de conta da T-08 ganha par: o cartão (19/08/2026) — B-D115
+
+Origem: relato do Abner de que o filtro de conta "não funciona" para a Luciana — o dropdown abre com as contas dela, escolher qualquer uma deixa o grid em branco, e voltar para "todas as contas" traz tudo de volta. No usuário dele o mesmo filtro funcionava.
+
+Não havia defeito. Ele só tem gasto em conta, ela só tem gasto em cartão — a diferença entre os dois usuários era coincidência de dados, não bug. O que existe é uma **lacuna**: uma compra no cartão é inalcançável pelo filtro de conta, porque o seletor vem de `ContaRepositorio.bancariasDoAmbiente`, que **exclui** conta de cartão de propósito (B-D62), enquanto a compra grava `lancamento.contaId` = a conta do cartão (`LancamentoServico.resolverContaDaCompra`), e o filtro é igualdade crua (`l.contaId = :contaId`). O seletor nunca oferece o valor que faria a compra aparecer.
+
+Decisão dele: a T-08 ganha um seletor de **cartão** ao lado do de conta, filtrando pelos cartões utilizados — próprios e compartilhados.
+
+| # | Decisão | Motivo resumido |
+|---|---|---|
+| B-D115 | **O filtro de cartão da T-08 escreve no mesmo `contaId`** que o filtro de conta — não é parâmetro novo da API. Funciona porque `cartao.id` **já é** o `contaId` do cartão, por construção (F5/B-D47). Os dois seletores são mutuamente exclusivos por construção: um estado só, `filtros.contaId`, que torna irrepresentável o par "conta X E cartão Y" — que devolveria vazio sempre | Um segundo caminho para a mesma consulta (um parâmetro `cartaoId` à parte) seria uma segunda fonte da verdade para a mesma pergunta, e a segunda é sempre a que envelhece. Custo aceito: o contrato passa a dizer explicitamente que `contaId` também aceita o id de um cartão. **B-D62 não é revogada nem enfraquecida** — vale onde foi decidida, a tela de contas; aqui o cartão é a única forma de alcançar as compras, e aparece em seletor próprio, sem virar "mais uma conta" na lista |
+
+**Por que não filtrar por `cartaoEmitidoId` (o plástico).** As duas pernas do pagamento da fatura não têm plástico e moram na mesma conta do cartão (B-D59); filtrar pelo plástico esconderia o pagamento do extrato do cartão. Filtrar pela conta do cartão devolve o pagamento junto — mas só o que o ambiente ativo movimentou (B-D21), não o extrato inteiro do plástico num cartão dividido (B-D110). Plástico é assunto da tela de cartões, não deste filtro.
+
+Não há migração: nenhuma mudança de schema, só o seletor novo e o contrato explicitando o que `contaId` já aceitava na prática.
+
 # 5. Revisões registradas (R1–R6, sessão de requisitos)
 
 Decisões que substituíram decisões anteriores durante o próprio processo. O motivo da mudança é tão importante quanto a decisão final.

@@ -554,6 +554,70 @@ atual depende do relay, então nada bloqueia por causa deste item.
 
 ---
 
+# Achados da leitura de 19/08/2026 — filtro de conta e cartão na T-08
+
+Origem: o mesmo relato que produziu B-D115 (`decisoes.md` §4r). A lacuna do filtro de conta
+foi corrigida com o seletor de cartão; este achado apareceu na mesma leitura, não é
+consertado agora, e fica registrado para não reaparecer como bug daqui a três meses.
+
+## I-31 — na T-08, o rodapé de totais não sinaliza que ele não é o extrato que fecha com o banco
+
+**Correção de rota.** Uma primeira versão deste achado comparava `app_saldo_da_conta` com
+`LancamentoRepositorio.buscar` e concluía que havia divergência sem decisão entre saldo e
+extrato numa conta compartilhada. Não há: é **B-D87** (`decisoes.md:376`) — *"Três consultas
+passam a atravessar ambientes; uma continua não atravessando"*. Saldo, extrato da conta
+(`app_extrato_da_conta`, usada por `ContaServico.extrato`, `ContaServico.java:246`, exposta em
+`GET /api/contas/{id}/extrato`) e total da fatura atravessam ambientes; o mapa não. **B-D96**
+(`decisoes.md:411`) nomeia as três funções com o mesmo porteiro na primeira linha
+(`conta_id IN (SELECT app_contas_do_usuario())`). Na T-05, onde saldo e extrato aparecem
+juntos, os dois atravessam e fecham entre si — não há o que resolver ali. E o **I-23**, na
+última seção, já registrou o mecanismo de explicação: a conta dividida vem com
+`compartilhada: true`, "e é essa marca que explica na tela por que o saldo é maior do que a
+soma dos lançamentos visíveis" (`inconsistencias.md:173`).
+
+O que sobrevive a B-D87 é bem menor, e é de tela, não de leitura.
+
+**O sintoma.** Na **T-08** (`Lancamentos.jsx:119,354-356`), o rodapé soma as linhas do mês
+**do ambiente ativo** (`somar(lista)`, sobre a lista que já veio recortada). Numa conta
+compartilhada, esse total nunca inclui os lançamentos que a outra pessoa fez no ambiente
+dela — e nada na tela diz isso. O comentário em `Contas.jsx:70-71` explica a diferença para
+quem lê o código; a T-08 não tem o equivalente para quem só olha a tela.
+
+**A causa.** É deliberada, não é defeito: o extrato do mês (`GET /api/lancamentos`) é o do
+ambiente e não atravessa — B-D87 e o Javadoc de `ContaServico.extrato`
+(`ContaServico.java:236-238`) dizem isso de propósito, e `ContaControlador.java:173-177`
+repete. O rodapé da T-08 apenas herda esse recorte, corretamente. O que falta não é mudar a
+conta — é a tela **apontar** que existe um número que fecha com o banco em outro lugar
+(`GET /api/contas/{id}/extrato`), do mesmo jeito que a T-05 aponta com `compartilhada: true`
+(I-23). A T-08 não tem marca equivalente.
+
+**O que o banco não pegou.** Nada pega — não é constraint nem política. É ausência de sinal
+na interface: o rodapé da T-08 não é o extrato que confere contra o banco, e nenhuma etiqueta
+diz isso a quem olha a tela.
+
+**O que falta.** Sinalização de tela na T-08 — por exemplo, indicar quando a conta filtrada é
+compartilhada e apontar o extrato da T-05 como o número que fecha. Não é decisão de leitura:
+B-D87 já decidiu que ler é assim.
+
+**Quando resolver:** sem dono e sem prazo — no próximo trabalho que toque a T-08.
+
+## I-32 — `LancamentoControlador.listar` não valida o `contaId` do filtro
+
+`LancamentoControlador.listar` (`LancamentoControlador.java:82-95`) passa o `contaId` do
+filtro direto ao serviço, sem validar. Um id inexistente, de outro ambiente, ou de conta
+encerrada devolve **200 com lista vazia**, indistinguível de "este mês não teve movimento".
+
+Não é vazamento: a RLS mais o recorte por `l.ambienteId` no serviço seguram. É pré-existente,
+não foi introduzido nesta entrega, e nenhuma decisão vigente exige validar id de **filtro** —
+a tabela de B-T1 governa recurso endereçado por caminho, não parâmetro de consulta.
+
+**O que o banco não pegou.** Nada pega — não é constraint nem política, é ausência de
+validação de borda.
+
+**Quando resolver:** junto da próxima fatia que mexer na T-08.
+
+---
+
 # Situação em 26/07/2026
 
 **Resolvidos:** I-01, I-02, I-03, I-05, I-09, I-10, I-11, I-12, I-14, I-15, I-16, I-17, I-19, I-20, I-21, I-22.
