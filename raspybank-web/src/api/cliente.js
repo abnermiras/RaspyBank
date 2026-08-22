@@ -16,6 +16,12 @@ import {
  * Nunca lança por status HTTP. Devolve sempre { ok, status, corpo } para que a
  * tela trate 401/409/400 como resposta e não como exceção — só falha de rede
  * vira erro de verdade.
+ *
+ * Com `comoArquivo`, a resposta BEM-SUCEDIDA vem como
+ * { ok, status, blob, nomeArquivo } em vez de `corpo`. A resposta de ERRO
+ * continua sendo lida como texto/JSON, e é isso que mantém `lerErro` valendo:
+ * o servidor recusa um download com o mesmo `{"erro": ...}` de sempre, e a
+ * tela não precisa de um segundo caminho de tratamento de erro.
  */
 export async function pedir(caminho, opcoes = {}) {
   const cabecalhos = { 'Content-Type': 'application/json' }
@@ -29,12 +35,64 @@ export async function pedir(caminho, opcoes = {}) {
     body: opcoes.corpo ? JSON.stringify(opcoes.corpo) : undefined,
   })
 
+  // POR QUE ISTO É UMA OPÇÃO DE `pedir`, E NÃO UMA FUNÇÃO PARALELA
+  //
+  // O token vive no localStorage, então um <a href> simples não carrega o
+  // `Authorization` e o download tem de passar por aqui de qualquer jeito.
+  // A tentação seria escrever um `baixar()` ao lado — e ele nasceria sem as
+  // duas coisas que `pedirComRenovacao` dá de graça: a renovação do token
+  // expirado e o resgate do 403 de B-D83. Como aquela função só lê `.status`
+  // e `.corpo?.motivo`, ela continua valendo SEM ALTERAÇÃO sobre este
+  // envelope, e o download herda as duas.
+  //
+  // O defeito que a função paralela produziria não apareceria no teste à mão:
+  // ele só aparece quinze minutos depois de logar, quando o acesso expira e o
+  // primeiro download do dia devolve 401 em vez do arquivo.
+  if (opcoes.comoArquivo && resposta.ok) {
+    return {
+      ok: true,
+      status: resposta.status,
+      blob: await resposta.blob(),
+      nomeArquivo: nomeNoCabecalho(resposta.headers.get('Content-Disposition')),
+    }
+  }
+
   const texto = await resposta.text()
   return {
     ok: resposta.ok,
     status: resposta.status,
     corpo: texto ? JSON.parse(texto) : {},
   }
+}
+
+/**
+ * O nome do arquivo sai do `Content-Disposition`, e não da tela.
+ *
+ * Quem baixa acessa do desktop e do celular, e o nome é a única coisa que
+ * sobrevive ao download: é ele que diz, três meses depois, qual faixa aquele
+ * arquivo cobre. Quem sabe a faixa é o servidor, então é de lá que o nome vem.
+ *
+ * Devolve `null` quando o cabeçalho não veio ou não deu para ler — a tela
+ * decide o nome de reserva, porque só ela sabe o que pediu.
+ */
+function nomeNoCabecalho(cabecalho) {
+  if (!cabecalho) return null
+
+  // A forma do RFC 5987 (`filename*=UTF-8''...`) vem primeiro de propósito:
+  // quando as duas estão presentes, ela é a que preserva acento.
+  const estendido = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(cabecalho)
+  if (estendido) {
+    try {
+      return decodeURIComponent(estendido[1].trim())
+    } catch {
+      // Percentagem malformada: cai para a forma simples abaixo.
+    }
+  }
+
+  const simples = /filename\s*=\s*"([^"]*)"/i.exec(cabecalho)
+    ?? /filename\s*=\s*([^;]+)/i.exec(cabecalho)
+  const nome = simples?.[1]?.trim()
+  return nome || null
 }
 
 /**

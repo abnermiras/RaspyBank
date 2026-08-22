@@ -381,4 +381,28 @@ export const relatorios = {
    */
   mapaDeGastos: (ano, contas = 'TODAS') =>
     pedirComRenovacao(`/api/relatorios/mapa-de-gastos?ano=${ano}&contas=${contas}`),
+
+  /**
+   * O extrato completo em `.xlsx` — a T-10, e o único endpoint binário do
+   * projeto.
+   *
+   * Sai do envelope de sempre por causa do `comoArquivo`: quando dá certo vem
+   * `{ ok, status, blob, nomeArquivo }`; quando dá errado vem o
+   * `{ ok, status, corpo }` normal, com o `{"erro": ...}` do contrato — então
+   * `lerErro` continua sendo o caminho de tratar 400 e 401.
+   *
+   * Sem as duas datas o servidor assume os últimos 12 meses, no mesmo espírito
+   * do `ano` ausente no mapa. A tela manda as duas mesmo assim, porque ela
+   * PRECISA saber a faixa para dizer, enquanto gera, o que está gerando.
+   */
+  extrato: (inicio, fim) => {
+    const busca = new URLSearchParams()
+    if (inicio) busca.set('inicio', inicio)
+    if (fim) busca.set('fim', fim)
+    const consulta = busca.toString()
+    return pedirComRenovacao(
+      `/api/relatorios/extrato.xlsx${consulta ? `?${consulta}` : ''}`,
+      { comoArquivo: true },
+    )
+  },
 }

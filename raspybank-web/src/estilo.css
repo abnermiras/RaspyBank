@@ -741,3 +741,39 @@ code {
     padding: .35rem 0;
     border-bottom: 1px solid var(--borda);
 }
+
+/* --------------------------------------------------------------------------
+   T-10 — a espera pelo extrato
+   --------------------------------------------------------------------------
+   Não é `.carregando`, e a diferença é intencional. Aquele é discreto porque
+   dura um instante; este pode durar dezenas de segundos, e nesse tempo o
+   discreto vira ambíguo: a pessoa não sabe se está gerando ou se travou. Daí o
+   bloco ter moldura, ficar logo abaixo do botão desabilitado e carregar o
+   cronômetro — os segundos correndo são a prova visível de que algo acontece. */
+
+.espera-longa {
+    margin-top: 1rem;
+    padding: .75rem .9rem;
+    background: var(--destaque-claro);
+    border: 1px solid var(--borda);
+    border-radius: var(--raio);
+}
+
+.espera-titulo {
+    margin: 0;
+    font-size: .88rem;
+}
+
+/* Monoespaçado para o número não empurrar o texto a cada segundo — a frase
+   pulando de lado sozinha parece defeito. */
+.espera-relogio {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--texto-fraco);
+}
+
+.espera-paciencia {
+    margin: .45rem 0 0;
+    font-size: .78rem;
+    color: var(--texto-fraco);
+}

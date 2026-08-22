@@ -251,6 +251,14 @@ primeiro no ambiente de desenvolvimento**, e vai para o Pi num deploy conjunto d
 junto da correção de código, porque migração de schema é classe de risco diferente: o Flyway
 a aplica no deploy, e uma que falhe no meio impede o app de subir.
 
+**Atenção a quem pegar esta pendência: o número V21 já tem outros dois pretendentes.** A
+T-10 (§4s de `decisoes.md`) tomou o V21 para o extrato completo e cedeu para **V22** ao achar
+`V21__telegram_e_um_destino_so.sql` já em `origin`; o Telegram, por sua vez, terá de virar
+**V23** no merge (mesma seção). Este gatilho é o **terceiro** candidato ao número — hoje três
+migrações diferentes disputam "V21" e nenhuma delas é mais essa outra. Confira o estado das
+migrações (`decisoes.md` §6) antes de nomear o arquivo; o próximo número livre pode já ter
+mudado de novo.
+
 ### A lição
 
 O invariante que faltava não era sobre o cartão — era sobre **duas leituras do mesmo dado
@@ -732,6 +740,198 @@ Duas, e as duas valem: (a) custo assumido em decisão ("a integridade fica na ap
 dívida com vencimento, não isenção — B-D55 previu exatamente este buraco e ninguém voltou
 para tapá-lo; (b) comentário que afirma uma garantia envelhece junto com o modelo, e
 comentário desatualizado que autoriza a operação errada é pior que comentário ausente.
+
+---
+
+# Achado da entrega de 20/08/2026 — T-10, extrato completo
+
+## I-34 — O plano da T-10 vazaria os plásticos alheios de um cartão dividido — **RESOLVIDO em 20/08/2026, antes de chegar à produção**
+
+Diferente do I-24 e do I-33, este não veio de um relato de uso: foi encontrado na revisão do
+plano de implementação, contra o que a V19/V20 já garantiam na tela. Fica registrado no
+mesmo formato dos outros dois porque a lição é reutilizável — a próxima função
+`SECURITY DEFINER` sobre lançamento pode cometer o mesmo erro, e nenhum teste de schema o
+acusaria.
+
+### O sintoma
+
+Não houve sintoma em produção. O sintoma foi textual: o plano de execução (`docs/desenho-t10-relatorios.md` e a instrução de implementação da V22) mandava resolver `ambiente_da_aba` da linha alheia só a partir de `conta_ambiente`, **preferindo `origem = true`** — a mesma regra que `app_extrato_da_conta` (V16) usa para uma conta comum dividida.
+
+### A causa
+
+Conta comum e conta de cartão não têm a mesma forma de vínculo. Aceitar um **plástico**
+vincula a **conta do contrato inteiro** ao ambiente de quem recebeu (`V19__compartilhamento_por_plastico.sql:226`,
+função `app_aceitar_convite_de_plastico`) — é assim que o lançamento dela tem onde morar
+(chave composta de B-D2). A V19/B-D106 fez dessa vinculação uma **consequência** do
+recebimento de um plástico, não mais a **concessão**: quem recebeu um cartão vê só os
+plásticos liberados para ela, nunca os dez do contrato.
+
+A regra "preferindo `origem = true`" ignora essa diferença. Aplicada como estava escrita, o
+extrato da T-10 entregaria, na aba de quem recebeu **um único** plástico, uma linha para
+**cada compra de todos os plásticos daquele cartão** — mascaradas (sem descrição nem
+categoria, pela regra de B-D89), mas com valor, data, conta e quem. É exatamente o que
+B-D106 tirou da tela e o que B-D110 recusa em palavras: *"ela vê o extrato do PLÁSTICO
+dela, não o do contrato"*.
+
+### O que o banco não pegou
+
+Nada — e a razão importa mais que o achado em si. Nenhuma `CHECK`, `FK` ou política de RLS
+impediria a versão errada: a política de `lancamento` estava e continua correta, e a função
+proposta é `SECURITY DEFINER` **por definição** — ela existe justamente para atravessar a
+política. Um teste de schema não vê a diferença entre a consulta certa e a errada, porque
+as duas são sintaticamente válidas e as duas *compilam* contra o mesmo banco. A única
+defesa possível é alguém comparar a consulta nova contra o modelo de negócio (B-D106) antes
+dela virar SQL.
+
+### A correção (aplicada na V22, antes de qualquer deploy)
+
+`app_extrato_completo` reproduz a mesma regra de `app_extrato_da_fatura` (V20): a linha
+alheia entra na minha aba quando `origem = true` **OU** a conta não é de cartão **OU** o
+plástico está liberado para o meu ambiente (`app_emitidos_liberados`, V19). Conta comum
+continua resolvendo por `origem` sozinho — ali o vínculo já diz tudo, porque não existe
+unidade menor que a conta. Detalhe em `docs/security-definer.md`, seção "Funções da V22".
+
+### O que ficou pendente
+
+Nada no código desta entrega. A pendência é de processo: **toda função `SECURITY DEFINER`
+nova que liste lançamento de conta compartilhada precisa reproduzir o recorte por plástico
+quando a conta puder ser de cartão** — e isso não é verificável por teste de schema, só por
+revisão contra `decisoes.md` §4n/§4o. Vale conferir as três funções existentes
+(`app_extrato_da_conta`, `app_saldo_da_conta`) contra este critério na próxima vez que
+alguma delas for tocada; não foram revisadas de novo aqui porque nenhuma mudou.
+
+### A lição
+
+O impasse de uma `SECURITY DEFINER` nova não é só "ela atravessa a RLS" — é "ela precisa
+redecidir, em SQL, uma regra de negócio que em outro lugar do sistema é imposta por uma
+combinação de tabelas diferentes". Copiar a regra de uma irmã parecida (conta comum) sem
+conferir se a irmã se aplica ao caso novo (conta de cartão) é como copiar um `WHERE` que
+parece certo e não é — a diferença só aparece quando alguém sabe a história por trás da
+V19, e é por isso que este documento existe.
+
+---
+
+# Achados do `qa-adversarial` de 20/08/2026 — T-10, extrato completo (segunda passada)
+
+Origem: os testes escritos contra o plano da T-10, antes de qualquer relato de uso — mesma
+classe do I-34: código examinado antes do primeiro byte real chegar a alguém. Os dois abaixo
+são independentes entre si e independentes do I-34.
+
+## I-35 — Nome de aba duplicado sumia com um ambiente inteiro do `.xlsx`, sem aviso — **RESOLVIDO em 20/08/2026, antes de chegar a produção**
+
+### O sintoma
+
+Dois ambientes com o **mesmo nome** produziam duas abas com o mesmo `<sheet name="…">` no
+OOXML. O formato exige nome único: o Excel recusa a pasta inteira, e uma leitora mais
+tolerante fica só com a primeira das duas — um ambiente inteiro desaparecendo do extrato,
+sem nenhuma mensagem.
+
+### A causa
+
+A unicidade era decidida sobre uma string **diferente da que chegava no arquivo**. O corte de
+31 caracteres era feito em `char` Java, e um emoji caindo bem na posição 30 era partido ao
+meio; o `fastexcel` **descarta em silêncio** o que não é XML 1.0 válido — confirmado no
+bytecode, `XmlEscapeHelper.appendEscapedCodePoint` faz `return` puro para o meio par
+surrogate que sobra do corte. Dois nomes de ambiente diferentes, depois desse descarte,
+podiam virar o mesmo texto gravado — e o desempate acontecia **antes** de saber disso.
+
+### O que o banco não pegou
+
+Nada — e não tinha como pegar. O nome da aba não é dado gravado; nasce da formatação, na
+hora de montar o arquivo. O que faltava não é constraint nenhuma: é **conferência no
+escritor**, que simplesmente não existia. É uma família de defeito que nenhuma `CHECK`
+alcança — invariante sobre dado **derivado na saída**, não sobre o que está na tabela.
+
+### A correção (aplicada em 20/08/2026)
+
+A regra "o que pode virar nome de aba" mudou de dono: passou a morar em `EscritorXlsx`
+(`raspybank-app/src/main/java/com/raspybank/app/servico/EscritorXlsx.java`), porque é
+propriedade do **formato** — deixá-la no montador faria cada relatório futuro redescobri-la
+sozinho. O escritor deixou de descartar em silêncio: agora **confere todos os nomes antes do
+primeiro byte** (`conferirNomes`) e recusa a planilha inteira se algum nome vier vazio, se
+algum nome não for **idêntico** ao próprio saneamento (`nomeDeAbaSaneado`), ou se duas abas
+colidirem ignorando caixa. A conferência é antes de abrir a pasta de propósito: estourar na
+quarta aba entregaria um `.xlsx` truncado, que é pior de diagnosticar do que um erro limpo
+antes de começar.
+
+Do lado de quem chama, `ExtratoCompletoMontador.saneado()` passou a rodar **antes** do
+desempate (`unico()`), e não depois — é o próprio texto final que entra no conjunto de
+nomes usados, e não um texto intermediário que o escritor ainda ia mudar por baixo.
+
+**Três casos latentes** que o mesmo defeito cobria, e que só apareceram ao escrever o teste
+vermelho:
+
+1. Ambiente cujo nome fosse **só** um surrogate solto produzia `<sheet name="">` — e uma
+   aba sem nome faz a **pasta inteira** deixar de abrir, pior que o caso original.
+2. `unico()` tinha a **segunda cópia** do mesmo bug, no corte que abre espaço para o sufixo
+   `(2)` quando dois nomes colidem depois do corte de 31.
+3. Caractere de controle no meio do nome (ex.: um ambiente digitado com um tab perdido no
+   meio) virava um nome diferente do que a pessoa via na tela, e podia colidir com um
+   ambiente realmente chamado assim.
+
+Guardado por `ExtratoCompletoNomeDeAbaTest`.
+
+### A lição
+
+Quando a aplicação desempata nomes, ela precisa desempatar **o texto final** — o que o
+formato realmente vai gravar —, nunca um texto intermediário que ainda vai passar por outro
+corte ou descarte antes de virar bytes. É a mesma lição do I-24 (duas leituras do mesmo dado
+discordando em silêncio), aplicada à escrita: aqui eram duas *decisões* sobre o mesmo dado
+— desempatar e escrever — discordando sobre qual string era a de verdade.
+
+## I-36 — O 401 respondia com corpo vazio, em todo endpoint protegido, desde sempre — **RESOLVIDO em 20/08/2026**
+
+Diferente do I-35: **não é defeito da T-10**, é do sistema inteiro, e a T-10 só o expôs.
+
+### O sintoma
+
+Todo `401` de sessão ausente ou expirada respondia com **zero bytes** — em qualquer endpoint
+fora de `/api/auth/**`, desde a Fase 4. `docs/api.md` promete, na §1 (B-T1), `{"erro": …}`
+para todo erro; a promessa era falsa há semanas, e ninguém tinha percebido porque nenhum
+teste conferia o **corpo** de um 401 — só o status.
+
+### Como apareceu
+
+A T-10 acrescentou, na §6c de `docs/api.md`, a linha `401 | sem token, ou token expirado |
+corpo é JSON de erro, nunca um .xlsx vazio`. O `qa-adversarial` escreveu o teste que cobrava
+essa linha (`ExtratoCompletoFaixaTest.semSessaoRespondeJsonDeErro`) — e ele falhou contra o
+código como estava. A entrega documentou o contrário do que o sistema fazia, e o teste
+pegou a divergência antes de ela virar arquivo `.xlsx` de zero byte na pasta de downloads de
+alguém.
+
+### O que o banco não pegou
+
+Nada — é contrato HTTP, não dado gravado. O que faltava era um teste que conferisse **corpo**
+de 401, e não só `getStatusCode()`. Os testes de 401 pré-existentes conferiam só o status:
+`CategoriaApiTest`, `ContaApiTest`, `CartaoApiTest`, `LancamentoApiTest`,
+`MapaDeGastosApiTest`, `FormaPagamentoApiTest`, `TransferenciaApiTest`, `PerfilApiTest` — nem
+um deles teria acusado o corpo vazio, porque nenhum olhava para ele.
+
+### A correção (aplicada em 20/08/2026)
+
+Classe nova, `PontoDeEntradaSemSessao`
+(`raspybank-app/src/main/java/com/raspybank/app/seguranca/PontoDeEntradaSemSessao.java`),
+registrada em `SegurancaConfig` no lugar do `HttpStatusEntryPoint` do Spring Security (que
+por natureza responde sem corpo). Devolve, para token ausente, malformado **ou** expirado —
+os três indistintamente, de propósito —
+`{"erro":"Sessão expirada ou ausente. Entre novamente."}`, `Content-Type:
+application/json;charset=UTF-8`. Sem `WWW-Authenticate`: o cabeçalho faria o navegador abrir
+a caixa de usuário/senha dele por cima da tela do sistema. Detalhe registrado em
+`docs/api.md` §1.
+
+### O que ficou pendente
+
+Nada de código. Fica o alerta de processo: regra de autorização nova nesta cadeia (papel,
+escopo, `@PreAuthorize`) precisa trazer junto um `AccessDeniedHandler` — hoje não existe
+porque a única regra desta cadeia é `authenticated()`, e quem passa por ela nunca leva 403
+daqui. Sem o handler, o mesmo buraco reabre para o 403.
+
+### A lição
+
+Teste que confere status e não confere corpo é metade de teste, para um contrato que promete
+os dois. A promessa de `docs/api.md` — "todo erro devolve `{"erro": …}`" — vale desde
+B-T1/B-T2 e nunca tinha sido verificada de ponta a ponta; bastou um teto novo (a T-10) exigir
+o corpo explicitamente para o buraco antigo aparecer.
 
 ---
 

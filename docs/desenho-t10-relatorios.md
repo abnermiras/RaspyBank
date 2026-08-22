@@ -1,18 +1,35 @@
 # RaspyBank — Desenho da T-10: Relatórios
 
-**Data:** 19/08/2026 · **Estado:** desenho, em aberto · **Implementado:** nada
+**Data:** 19/08/2026 · **Estado:** **SUPERADO em 20/08/2026** · **Implementado:** ver abaixo
 
-> ## Leia isto antes
+> ## Leia isto antes — SUPERADO, e por outro caminho
 >
-> Este documento é **desenho, não decisão**. Ele não é fonte de verdade — `docs/decisoes.md` é.
+> Este documento é **desenho, não decisão**, e nunca foi fonte de verdade — `docs/decisoes.md`
+> é. Em 20/08/2026 o Abner e a investigação do dia decidiram **diferente do que está escrito
+> aqui**: a T-10 saiu **síncrona**, sem fila, sem tabela de estado, sem executor e sem volume
+> em disco. As decisões de verdade estão em `docs/decisoes.md` §4s, como **B-D116 a B-D119** —
+> e valem a pena ler juntas com este arquivo, porque a diferença entre os dois é o que a
+> investigação encontrou.
 >
-> Nada aqui foi implementado: não há migração, não há código, não há linha em `docs/api.md`.
-> As decisões numeradas **B-D116 a B-D119** são *propostas*, escritas com número só para a
-> conversa ter apelido. Elas **não existem** enquanto não forem escritas em `docs/decisoes.md`,
-> no mesmo commit que as implementar. Se este arquivo contradisser o registro, o registro vence.
+> **Armadilha para quem ler daqui a um ano:** os números **B-D116 a B-D119** abaixo, neste
+> arquivo, **têm outro conteúdo** dos B-D116–B-D119 que existem de verdade. Aqui, B-D116 é
+> "identidade em thread de fundo" — a peça da fila que a decisão real **recusou**. Em
+> `decisoes.md`, B-D116 é "o relatório é síncrono, com teto de 12 meses". Mesmo número, duas
+> conversas diferentes: os números deste rascunho nunca passaram a valer, e a numeração real
+> só foi atribuída no dia em que a decisão de verdade fechou. Se você está procurando o que
+> B-D116 diz, vá para `decisoes.md` — nunca para aqui.
 >
-> Ele está no repositório por um motivo só: o desenho custou uma sessão de investigação e o
-> Abner ainda está pensando no relatório como um todo. Perder isto custaria refazer.
+> O que sobreviveu da investigação registrada abaixo: uma aba por ambiente, a máscara da linha
+> alheia, dinheiro como número no `.xlsx`, e a leitura por `SECURITY DEFINER`. O que não
+> sobreviveu: a fila inteira — tabela `relatorio`, executor, propagação de identidade entre
+> threads, volume no Pi, 4 endpoints e polling. O motivo de a fila ter caído está em
+> `decisoes.md` §4s: o Mapa de Gastos já fazia a parte cara a cada abertura, e um teto de 12
+> meses bastou para limitar o pior caso sem nenhuma daquelas peças.
+>
+> Este arquivo fica no repositório como registro do caminho que **não** foi tomado e do porquê
+> — não é lixo, é a investigação que tornou a decisão de 20/08/2026 possível de defender. Mas
+> ele não é fonte de verdade e nunca foi: quando ele contradisser `decisoes.md`, `decisoes.md`
+> vence, sempre.
 
 ---
 
