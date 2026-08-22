@@ -169,6 +169,22 @@ public class ExtratoCompletoMontador {
 
         // Uma vez por ambiente. Ver o javadoc da classe antes de mover isto
         // para dentro de um laco de conta ou de fatura.
+        //
+        // ESTE LACO SO FUNCIONA SOB READ COMMITTED, e isso e uma premissa que
+        // nada no projeto declara: nenhum arquivo configura nivel de
+        // isolamento, entao vale o padrao do PostgreSQL, que e READ COMMITTED.
+        //
+        // A cadeia importa. Esta transacao (readOnly) foi aberta ANTES do laco;
+        // cada `sincronizar` e REQUIRES_NEW, abre transacao propria e commita;
+        // e o SELECT de `consultar` acontece DEPOIS, dentro da transacao de
+        // fora. Sob READ COMMITTED cada statement pega um snapshot novo, entao
+        // aquele SELECT enxerga o que os commits internos gravaram.
+        //
+        // Sob REPEATABLE READ o snapshot seria o da abertura da transacao de
+        // fora, e a sincronizacao inteira seria DESCARTADA EM SILENCIO: o
+        // arquivo sairia com situacao velha — previsto vencido ainda como
+        // previsto —, sem erro, sem log e sem teste vermelho. Quem mexer em
+        // isolamento globalmente precisa reler este laco.
         LocalDate hoje = LocalDate.now();
         for (Ambiente ambiente : meus) {
             situacoes.sincronizar(ambiente.getId(), hoje);

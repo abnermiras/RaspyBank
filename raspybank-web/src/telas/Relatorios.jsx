@@ -287,7 +287,14 @@ function umAno(iso, passo) {
   return juntar(alvo, mes, Math.min(dia, ultimoDiaDoMes))
 }
 
-/** O espelho de `LocalDate.plusMonths(12)` do servidor. */
+/**
+ * O espelho de `LocalDate.plusMonths(12)` do servidor.
+ *
+ * O DOZE está escrito aqui e em `RelatorioControlador.MESES_DE_TETO`, e nada
+ * verifica que os dois concordam — a duplicação da FRASE está decidida em
+ * §4s(e), a do NÚMERO é consequência dela e não tem teste que a guarde. Mudar o
+ * teto é mudar nos dois arquivos, no mesmo commit.
+ */
 const maisDozeMeses = (iso) => umAno(iso, +1)
 
 /**

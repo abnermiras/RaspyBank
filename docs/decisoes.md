@@ -616,6 +616,30 @@ Registrados em detalhe, no formato de defeito real, em `docs/inconsistencias.md`
 
 **e) As frases de erro do teto de 12 meses são cópia literal do servidor**, duplicadas de propósito na tela para a recusa ser imediata: pedir ao servidor para saber o que dizer seria a mesma ida e volta que a validação local existe para evitar, e duas redações do mesmo erro fariam a pessoa achar que são dois problemas.
 
+## O parecer de fronteiras (commit `08d7226`, 20/08/2026)
+
+**Limpo, sem bloqueante.** O `revisor-de-fronteiras` confirmou três garantias que valem
+registrar como confirmadas, não como pendência: o recorte por plástico da V22 não tem caminho
+de fuga — `cartao.conta_id` é `PRIMARY KEY` (`V12:100`), então `ct.conta_id IS NULL` só é
+verdadeiro para conta que **não** é cartão; `ux_ca_uma_origem` (`V16:75`) garante uma origem
+por conta; e o `CROSS JOIN LATERAL` **corta em vez de deixar passar** quando nenhum vínculo
+sobrevive ao recorte — o modo de falha é "some", não "vaza". A máscara está completa:
+`lancamento` tem exatamente duas colunas de texto livre, `descricao` (mascarada) e
+`observacao` (que não sai da função). E B-D117 está contido: `app_extrato_completo` tem um
+único chamador em todo o código de produção.
+
+Quatro dívidas ficaram registradas, em `docs/inconsistencias.md`, no formato leve de achado
+em aberto (nenhuma é defeito ativo, nenhuma bloqueou a entrega): **I-37** (o rótulo de
+apresentação da forma de pagamento mora em `FormaPagamentoControlador`, e o montador do
+extrato importa `..web..` para chamá-lo — camada ao contrário, sem decisão que a proíba);
+**I-38** (a conexão fica presa durante a transmissão do `.xlsx`, com dois efeitos ainda não
+escritos: pressão sobre o autovacuum se o teto de 12 meses subir, e um `.xlsx` truncado se
+`idle_in_transaction_session_timeout` for configurado); **I-39** (o 401 JSON de
+`PontoDeEntradaSemSessao`, do I-36, alcança toda a cadeia de segurança e não só `/api/**` —
+consequência do I-36 que ninguém tinha escrito); **I-40** (`MigracoesTest` confere os nomes
+das funções `SECURITY DEFINER` mas não o `search_path` delas — a mais valiosa das quatro, e
+pré-existente à T-10).
+
 # 5. Revisões registradas (R1–R6, sessão de requisitos)
 
 Decisões que substituíram decisões anteriores durante o próprio processo. O motivo da mudança é tão importante quanto a decisão final.

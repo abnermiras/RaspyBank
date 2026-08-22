@@ -56,6 +56,14 @@ public class RelatorioControlador {
      * <p>Ele e o que torna a entrega sincrona defensavel: limita o pior caso a
      * milhares de linhas. Mexer neste numero e mexer em B-D116, e a frase de
      * recusa cita "12 meses" por extenso — as duas coisas andam juntas.</p>
+     *
+     * <p><b>E MEXER EM raspybank-web/src/telas/Relatorios.jsx TAMBEM.</b> A
+     * tela repete o teto para responder sem ida e volta: o numero em
+     * {@code maisDozeMeses} e a frase em {@code TETO_DE_DOZE_MESES}. A
+     * duplicacao da frase esta decidida em §4s(e); a do numero e consequencia
+     * dela e nao tem teste que a guarde. Mudar so aqui produz duas respostas
+     * para o mesmo pedido — a tela recusando o que o servidor aceitaria, que e
+     * o lado que a pessoa nao consegue contornar.</p>
      */
     private static final int MESES_DE_TETO = 12;
 

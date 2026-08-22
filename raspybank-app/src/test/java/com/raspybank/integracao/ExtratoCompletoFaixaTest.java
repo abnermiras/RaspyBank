@@ -28,6 +28,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * A borda do extrato: o teto de 12 meses, a entrada malformada e a ausencia de
  * sessao — §6c de {@code docs/api.md}.
  *
+ * <p>Da ausencia de sessao, cobra-se aqui apenas o que e proprio deste
+ * endpoint: que o 401 nao chegue vestido de planilha. A forma do corpo do 401
+ * e contrato do sistema (I-36) e mora em {@code AutenticacaoFluxoTest}.</p>
+ *
  * <h3>O modo de falha proprio de um endpoint binario</h3>
  *
  * <p>Depois do primeiro byte o status ja foi para o fio, e {@code 400} deixa de
@@ -212,10 +216,17 @@ class ExtratoCompletoFaixaTest extends IntegracaoTest {
                 + " ao download: " + anexo);
     }
 
+    // O que se cobra aqui e so o modo de falha do endpoint BINARIO: o 401 nao
+    // pode sair vestido de planilha, nem vazio, nem truncado. A FORMA do corpo
+    // ({"erro": frase}, uma chave, UTF-8) e contrato do sistema inteiro — vive
+    // no ponto de entrada de seguranca, vale para todo endpoint protegido, e
+    // por isso e cobrada em AutenticacaoFluxoTest (I-36). Se a T-10 for
+    // apagada um dia, a prova daquele contrato nao vai junto.
+
     @Test
     @Order(11)
-    @DisplayName("Sem token, 401 com JSON de erro — nunca um .xlsx vazio ou truncado")
-    void semSessaoRespondeJsonDeErro() {
+    @DisplayName("Sem token, o 401 nao sai como planilha — nunca um .xlsx vazio ou truncado")
+    void semSessaoNaoDevolveBytesDePlanilha() {
         ResponseEntity<byte[]> r = http.exchange(
             "/api/relatorios/extrato.xlsx?inicio=2026-01-01&fim=2026-06-30",
             HttpMethod.GET, new HttpEntity<>(new HttpHeaders()), byte[].class);
@@ -227,14 +238,11 @@ class ExtratoCompletoFaixaTest extends IntegracaoTest {
                 + " como .xlsx e a pessoa abriria um arquivo quebrado");
 
         assertEhJsonDeErro(r);
-        assertNotNull(comoMapa(r).get("erro"),
-            "O 401 nao traz {\"erro\": ...}. B-T1 diz que TODO erro tem essa forma,"
-                + " e §6c promete que este 401 e \"JSON de erro, nunca um .xlsx vazio\"");
     }
 
     @Test
     @Order(12)
-    @DisplayName("Token invalido tambem responde JSON de erro, e nao bytes de planilha")
+    @DisplayName("Token invalido tambem nao gera arquivo: JSON de erro, nao bytes de planilha")
     void tokenInvalidoNaoGeraArquivo() {
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth("nao.e.um.token");

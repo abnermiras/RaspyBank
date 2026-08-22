@@ -894,10 +894,17 @@ teste conferia o **corpo** de um 401 — só o status.
 
 A T-10 acrescentou, na §6c de `docs/api.md`, a linha `401 | sem token, ou token expirado |
 corpo é JSON de erro, nunca um .xlsx vazio`. O `qa-adversarial` escreveu o teste que cobrava
-essa linha (`ExtratoCompletoFaixaTest.semSessaoRespondeJsonDeErro`) — e ele falhou contra o
-código como estava. A entrega documentou o contrário do que o sistema fazia, e o teste
-pegou a divergência antes de ela virar arquivo `.xlsx` de zero byte na pasta de downloads de
-alguém.
+essa linha, dentro de `ExtratoCompletoFaixaTest` — e ele falhou contra o código como estava.
+A entrega documentou o contrário do que o sistema fazia, e o teste pegou a divergência antes
+de ela virar arquivo `.xlsx` de zero byte na pasta de downloads de alguém.
+
+**Onde a prova mora hoje.** Ela mudou de endereço logo depois, pela observação O5 do
+`revisor-de-fronteiras`: o contrato do corpo do 401 é do sistema inteiro, e deixá-lo provado
+só dentro da T-10 significava que apagar a T-10 levaria junto a prova de algo que não é dela.
+A forma do corpo é conferida em `AutenticacaoFluxoTest` (`assertCorpoDo401`, comparação **byte
+a byte** — `assertNotNull(get("erro"))` passaria com o acento gravado em Latin-1); o que ficou
+em `ExtratoCompletoFaixaTest` é só o modo de falha do endpoint binário, que o 401 não saia com
+`Content-Type` de planilha nem como `.xlsx` truncado.
 
 ### O que o banco não pegou
 
@@ -932,6 +939,110 @@ Teste que confere status e não confere corpo é metade de teste, para um contra
 os dois. A promessa de `docs/api.md` — "todo erro devolve `{"erro": …}`" — vale desde
 B-T1/B-T2 e nunca tinha sido verificada de ponta a ponta; bastou um teto novo (a T-10) exigir
 o corpo explicitamente para o buraco antigo aparecer.
+
+---
+
+# Achados do `revisor-de-fronteiras` sobre o commit `08d7226` (20/08/2026) — T-10, extrato completo
+
+Origem: parecer de fronteiras sobre a entrega que fechou §4s. **O parecer foi limpo, sem
+bloqueante** — os quatro itens abaixo são dívidas conhecidas, não defeito ativo, e nenhum
+impediu o commit. Formato leve, porque não há sintoma nem correção: é achado em aberto, não
+o formato completo do I-24.
+
+O parecer também **confirmou** três garantias que valem registrar como ficaram escritas, não
+como pendência: o recorte por plástico da V22 não tem caminho de fuga (`cartao.conta_id` é
+`PRIMARY KEY` — `V12__cartao_de_credito.sql:100` — então `ct.conta_id IS NULL` só é verdadeiro
+para conta que **não** é cartão; `ux_ca_uma_origem` — `V16__compartilhamento_de_conta.sql:75`
+— garante uma origem por conta; e o `CROSS JOIN LATERAL` de `app_extrato_completo`
+(`V22__extrato_completo.sql:220`) **corta em vez de deixar passar** quando nenhum vínculo
+sobrevive ao recorte — o modo de falha é "some", não "vaza"); a máscara está completa
+(`lancamento` tem exatamente duas colunas de texto livre, `descricao`, mascarada, e
+`observacao`, que não sai da função); e B-D117 está contido (`app_extrato_completo` tem um
+único chamador em todo o código de produção).
+
+## I-37 — Rótulo de apresentação da forma de pagamento mora num controlador, e o montador do extrato importa `..web..` para usá-lo
+
+`FormaPagamentoControlador.Item.nomeDe` (`FormaPagamentoControlador.java:77`) é
+`public static`, e `ExtratoCompletoMontador` — que está em `..app.servico..` — importa
+`..app.web..` para chamá-lo (`ExtratoCompletoMontador.java:5,370`). É a camada ao contrário:
+serviço dependendo de borda HTTP.
+
+**Por que não foi consertado.** Nenhuma decisão vigente sustenta a objeção. O
+`ArquiteturaTest` policia módulo contra módulo, e sua única regra intra-módulo é `..web..` não
+depender de `..repositorio..`; `docs/decisoes.md` não diz nada sobre a direção entre
+`app.web` e `app.servico`; os dois pacotes estão no mesmo módulo e nenhum contexto de negócio
+foi atravessado. A alternativa que existia — uma terceira cópia da lista de rótulos — é pior,
+e o javadoc daquele controlador diz explicitamente para não fazê-la.
+
+**A saída recomendada.** Extrair os rótulos para uma classe em `..app.servico..`; controlador
+e montador passam a chamá-la, e a seta vira `web → servico`, que é a direção natural.
+
+**A saída que parece mais limpa, e tem armadilha.** `FormaPagamento.rotulo()` no enum, em
+`raspybank-lancamento`. P2 diz *"sem campo paralelo, sem conversor"*, e um `rotulo()` no enum
+é exatamente a forma que alguém vai citar daqui a um ano como precedente para um campo
+paralelo. Se for por aí, exige decisão registrada dizendo que rótulo de tela não é conversor
+de persistência.
+
+**Descartada.** Mover o montador para `..app.web..`. Ele é `@Transactional(readOnly=true)` e
+injeta `EntityManager` (`ExtratoCompletoMontador.java:159,225`); mover trocaria um ciclo
+cosmético por acesso transacional a dado dentro do pacote da borda, que é o que a regra
+`controladorNaoUsaRepositorio` existe para impedir.
+
+**Quando resolver:** na próxima vez que a lista de rótulos de forma de pagamento mudar, ou
+antes disso se a decisão sobre `web → servico` for registrada por outro motivo.
+
+## I-38 — A conexão fica presa durante a transmissão do `.xlsx` do extrato completo
+
+`RelatorioControlador` escreve no `OutputStream` da resposta dentro do `@Transactional` do
+montador. O javadoc já assume o preço, e o tratamento de `isCommitted()`/`reset()` está
+correto. Duas consequências não estavam escritas em lugar nenhum:
+
+1. A conexão fica `idle in transaction` durante o download, segurando o horizonte de `xmin` e
+   impedindo o autovacuum de limpar tuplas mortas de `lancamento` e `registro_auditoria`
+   naquele intervalo. Irrelevante em 76 ms de download típico; **deixa de ser se o teto de 12
+   meses (B-D116) subir algum dia** — esse é o gatilho a vigiar.
+2. Se alguém configurar `idle_in_transaction_session_timeout` no Pi — coisa que se faz sem
+   pensar em endpoint binário — o download morre no meio e produz exatamente o `.xlsx`
+   truncado que a §6c de `docs/api.md` descreve como modo de falha aceito. O sintoma vai
+   apontar para o lugar errado (parece defeito do escritor ou da rede, não configuração de
+   banco), e é por isso que precisa estar escrito aqui.
+
+**Quando resolver:** não é ação pendente, é vigilância. Revisitar se o teto de 12 meses subir,
+ou se algum dia o Pi ganhar `idle_in_transaction_session_timeout` configurado.
+
+## I-39 — O 401 JSON de `PontoDeEntradaSemSessao` (I-36) alcança toda a cadeia de segurança, não só `/api/**`
+
+O `PontoDeEntradaSemSessao` vale para toda a cadeia de segurança, não só a API. Efeito: quem
+digitar uma URL desconhecida no navegador agora vê `{"erro":"Sessão expirada ou ausente.
+Entre novamente."}` cru na tela, em vez de página em branco.
+`TelasEstaticasTest.caminhoNaoLiberadoNemChegaAoDisco` (`TelasEstaticasTest.java:111`,
+"Caminho fora da lista responde 401") continua verde — o teste confere status e a ausência de
+vazamento de existência, não a experiência de quem só queria ver uma tela.
+
+Não contraria decisão nenhuma — B-T1 pede corpo em todo erro, e isso é um erro. Registro como
+a única consequência do I-36 que ninguém tinha escrito, para quem topar com ela no navegador
+não achar que é defeito novo.
+
+**Quando resolver:** só se a experiência de erro de navegação (URL digitada errada, link
+quebrado) virar pauta de produto. Não bloqueia nada hoje.
+
+## I-40 — `MigracoesTest` não confere `search_path` das funções SECURITY DEFINER
+
+**A mais valiosa das quatro, e é pré-existente** — não nasceu com a T-10, só apareceu na
+revisão dela. `MigracoesTest.inventarioSecurityDefinerConfere` (`MigracoesTest.java:180-204`)
+compara os nomes das funções `SECURITY DEFINER` com o inventário e para aí. Nada quebra o
+build se a próxima função nascer **sem `SET search_path`** — que é a falha mais perigosa e
+mais silenciosa dessa família: uma função `SECURITY DEFINER` sem `search_path` fixo pode ser
+sequestrada por um schema no caminho de busca.
+
+A V22 tem `SET search_path = public, pg_temp` (`V22__extrato_completo.sql:104`), e todas as
+funções atuais têm — **não há defeito hoje**. O que falta é a guarda: um
+`AND p.proconfig IS NOT NULL` na mesma consulta do teste fecharia a lacuna, no espírito da
+terceira pergunta do formato do I-24 — aqui, o que o *teste* não pega, não o que o código
+errou.
+
+**Quando resolver:** na próxima vez que `MigracoesTest` for tocado, ou antes da primeira
+função `SECURITY DEFINER` escrita por alguém que não conheça esta convenção.
 
 ---
 
