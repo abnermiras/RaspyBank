@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * O caminho de escrita do Telegram no perfil (B-D115), atacado de fora.
+ * O caminho de escrita do Telegram no perfil (B-D120), atacado de fora.
  *
  * <p>Nao repete o caminho feliz — {@code PerfilApiTest} ja o cobre. Aqui esta
  * a segunda operacao: limpar depois de gravar, gravar o que ja e de outro,

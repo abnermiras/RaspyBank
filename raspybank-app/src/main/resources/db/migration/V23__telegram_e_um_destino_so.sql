@@ -1,14 +1,14 @@
 -- =============================================================================
--- V21 — Um Telegram e um destino so, e destino vazio nao e destino
+-- V23 — Um Telegram e um destino so, e destino vazio nao e destino
 -- =============================================================================
 -- Dois defeitos achados pelo qa-adversarial em 18/08/2026 (TelegramNoPerfilTest),
 -- logo depois que o PUT /api/perfil/telegram abriu o terceiro caminho de escrita
--- da coluna (B-D115). Os dois tem a mesma raiz: uma invariante de negocio que o
+-- da coluna (B-D120). Os dois tem a mesma raiz: uma invariante de negocio que o
 -- projeto escreveu em prosa e em Java, e nunca escreveu no banco.
 --
--- 1) O INDICE UNICO NAO IMPEDIA O QUE B-D116 DIZ QUE ELE IMPEDE
+-- 1) O INDICE UNICO NAO IMPEDIA O QUE B-D121 DIZ QUE ELE IMPEDE
 --
---    B-D116 recusa verificacao de posse do telegramId, e o argumento inteiro se
+--    B-D121 recusa verificacao de posse do telegramId, e o argumento inteiro se
 --    apoia numa frase: "o indice unico ja impede duas contas apontando para o
 --    mesmo destino". docs/api.md repete a promessa no 409, com o motivo:
 --    "duas contas apontando para o mesmo destino fariam o bot nao saber para
@@ -18,7 +18,7 @@
 --    'abner', 'ABNER' e '@abner' sao a MESMA conta — o username nao diferencia
 --    caixa, e o '@' e enfeite de exibicao, nao parte do identificador. Tres
 --    contas do RaspyBank gravaram as tres grafias, todas com 200. A premissa de
---    B-D116 era falsa; esta migracao a torna verdadeira, em vez de mudar a
+--    B-D121 era falsa; esta migracao a torna verdadeira, em vez de mudar a
 --    decisao que dependia dela.
 --
 --    O padrao ja existia na mesma tabela e no mesmo arquivo: ux_usuario_email
@@ -39,7 +39,7 @@
 --    guarda: basta um quarto caminho de escrita (o bot, uma importacao, uma
 --    correcao manual) para a invariante cair. Agora ela e CHECK.
 --
--- O QUE ESTA MIGRACAO NAO FAZ: verificacao de posse. B-D116 continua valendo —
+-- O QUE ESTA MIGRACAO NAO FAZ: verificacao de posse. B-D121 continua valendo —
 -- quem digitar o Telegram de outra pessoa seguira sem aviso. O que muda e que
 -- duas contas nao ficam mais apontando para o mesmo destino, que era o que a
 -- decisao afirmava ja acontecer.
@@ -89,7 +89,7 @@
 --   O '^@' ancorado tira EXATAMENTE um '@' inicial, que e o que o '@' e: prefixo
 --   de exibicao, um so. '@@abner' continua sendo '@abner' depois de normalizado,
 --   nao colide com ninguem e simplesmente nunca sera reconhecido — que e o dano
---   que B-D116 ja aceitou em voz alta ("o dano de errar e nao funcionar").
+--   que B-D121 ja aceitou em voz alta ("o dano de errar e nao funcionar").
 --
 --   btrim entra na expressao porque ' abner' e 'abner' sao o mesmo destino:
 --   espaco em volta nao faz parte de identificador nenhum.
@@ -125,7 +125,7 @@ BEGIN
     GET DIAGNOSTICS v_linhas = ROW_COUNT;
 
     IF v_linhas > 0 THEN
-        RAISE NOTICE 'V21: % linha(s) com telegram_id em branco viraram NULL.', v_linhas;
+        RAISE NOTICE 'V23: % linha(s) com telegram_id em branco viraram NULL.', v_linhas;
     END IF;
 END;
 $$;
@@ -152,7 +152,7 @@ BEGIN
 
     IF v_relato IS NOT NULL THEN
         RAISE EXCEPTION
-            E'V21 nao pode continuar: ha telegram_id que nao identifica conta '
+            E'V23 nao pode continuar: ha telegram_id que nao identifica conta '
             'nenhuma depois de normalizado (um "@" sem nome, por exemplo).\n%\n'
             'Decida caso a caso e limpe (UPDATE usuario SET telegram_id = NULL '
             'WHERE id = ...) antes de aplicar a migracao de novo.', v_relato;
@@ -192,7 +192,7 @@ BEGIN
 
     IF v_relato IS NOT NULL THEN
         RAISE EXCEPTION
-            E'V21 nao pode continuar: ha contas diferentes apontando para o MESMO '
+            E'V23 nao pode continuar: ha contas diferentes apontando para o MESMO '
             'destino de Telegram (o "@" e a caixa nao os distinguem).\n%\n'
             'Escolha qual conta fica com cada destino e limpe as outras '
             '(UPDATE usuario SET telegram_id = NULL WHERE id = ...) antes de '
@@ -267,7 +267,7 @@ COMMENT ON COLUMN usuario.telegram_id IS
 --   SELECT auth_cadastrar_usuario('B', 'b@x.local', 'hash', 'ALIAS_TESTE');
 --   -- ERRO: duplicate key value violates unique constraint "ux_usuario_telegram"
 --   SELECT auth_cadastrar_usuario('C', 'c@x.local', 'hash', '@alias_teste');
---   -- ERRO: o mesmo. Antes da V21 os tres entravam, e o bot ficava sem saber
+--   -- ERRO: o mesmo. Antes da V23 os tres entravam, e o bot ficava sem saber
 --   -- para quem lancar — que e o motivo do 409 escrito em docs/api.md.
 --
 --   -- (b) A parcialidade continua de pe: varios sem Telegram convivem.
