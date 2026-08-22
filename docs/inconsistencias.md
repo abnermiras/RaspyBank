@@ -245,19 +245,25 @@ e depois não guarda nada.
 
 ### O que ficou pendente
 
-**Migração V21 com o gatilho no banco**, para o invariante valer também contra SQL manual e
-código futuro que não passe pelo serviço. **Decisão do Abner (08/08/2026): a V21 é feita
+**Uma migração com o gatilho no banco**, para o invariante valer também contra SQL manual e
+código futuro que não passe pelo serviço. **Decisão do Abner (08/08/2026): a migração é feita
 primeiro no ambiente de desenvolvimento**, e vai para o Pi num deploy conjunto depois — não
 junto da correção de código, porque migração de schema é classe de risco diferente: o Flyway
 a aplica no deploy, e uma que falhe no meio impede o app de subir.
 
-**Atenção a quem pegar esta pendência: o número V21 já tem outros dois pretendentes.** A
-T-10 (§4s de `decisoes.md`) tomou o V21 para o extrato completo e cedeu para **V22** ao achar
-`V21__telegram_e_um_destino_so.sql` já em `origin`; o Telegram, por sua vez, terá de virar
-**V23** no merge (mesma seção). Este gatilho é o **terceiro** candidato ao número — hoje três
-migrações diferentes disputam "V21" e nenhuma delas é mais essa outra. Confira o estado das
-migrações (`decisoes.md` §6) antes de nomear o arquivo; o próximo número livre pode já ter
-mudado de novo.
+**Nota de 18/08/2026:** esta pendência foi escrita chamando a migração futura de "V21", e o
+número foi ocupado pela correção do I-41/I-42, sem relação com este item.
+
+**Nota de 22/08/2026:** o "V21" acabou sendo disputado por **três** coisas — esta pendência, a
+correção do I-41/I-42, e o extrato completo da T-10. As duas últimas foram numeradas em
+branches paralelas, cada uma olhando só a sua, e nenhuma viu a outra. A T-10 ficou com a **V22**
+(está na `main`) e a correção do I-41/I-42 virou **V23**. Esta pendência continua sem número, e
+agora com o motivo escrito: **número de migração não se reserva olhando a própria branch.** Antes
+de escolher, `git ls-tree` nas outras — o Flyway não aceita versão menor chegando depois da
+maior, e depois que qualquer uma roda no Pi, renumerar deixa de ser renomear arquivo.
+
+Antes de nomear o arquivo, confira o estado das migrações em `decisoes.md` §6: o próximo número
+livre pode ter mudado de novo, e o V21 continua vago justamente por já ter sido disputado.
 
 ### A lição
 
@@ -1043,6 +1049,84 @@ errou.
 
 **Quando resolver:** na próxima vez que `MigracoesTest` for tocado, ou antes da primeira
 função `SECURITY DEFINER` escrita por alguém que não conheça esta convenção.
+
+# Achados do `qa-adversarial` sobre o caminho de edição do Telegram (18/08/2026)
+
+Origem: `qa-adversarial` testando o `PUT /api/perfil/telegram` (B-D120) antes do `revisor-de-fronteiras`. Os dois primeiros são defeitos de verdade, consertados por `banco-e-migracoes` na V23. O terceiro é um grupo de achados menores, deliberadamente não consertados — proporção, não esquecimento.
+
+## I-41 — Três grafias do mesmo Telegram passavam por três contas diferentes — **RESOLVIDO em 18/08/2026, na V23**
+
+### O sintoma
+
+Três contas gravaram `alias44a67a8d`, `ALIAS44A67A8D` e `@alias44a67a8d`, cada `PUT` respondendo 200. As três apontam para o mesmo destino de Telegram — a mesma pessoa recebendo mensagem do bot por qualquer uma delas —, e o índice único deixou passar.
+
+### A causa
+
+`ux_usuario_telegram` (V1) era um índice sobre o texto **literal** da coluna. O `@Pattern` do campo aceita as duas grafias de propósito (B-D105, B-D120): o bot ainda não existe, e não há como saber se ele vai mandar o id numérico ou o `@usuario`. A validação frouxa e o índice literal, juntos, deixaram uma fresta: mesma pessoa, três formas de escrever, três linhas diferentes para o índice.
+
+### O que o banco não pegou
+
+A unicidade existia — só que sobre a forma **digitada**, não a forma **normalizada**. O caso irmão, `ux_usuario_email`/`lower(email)`, já resolvia exatamente este problema na mesma tabela desde a V1; o `telegram_id` não recebeu o mesmo tratamento quando o campo ganhou índice único, e ninguém notou até o `qa-adversarial` testar as três grafias de propósito.
+
+### A correção (V23)
+
+`DROP` + `CREATE UNIQUE INDEX ux_usuario_telegram` — **mesmo nome, de propósito**: `TratadorGlobalDeErros:151` procura essa string na mensagem de erro do Postgres para devolver 409, e um nome novo faria a mesma violação virar 500 em vez de 409. A expressão nova é `lower(regexp_replace(btrim(telegram_id), '^@', ''))`, mantendo a parcialidade `WHERE telegram_id IS NOT NULL`. Dado existente foi conferido na própria migração: colisão real teria falhado a migração com relatório, em vez de escolher um vencedor — não houve, porque o defeito foi achado antes de qualquer conta real usar o campo.
+
+### O que ficou pendente
+
+O caso em si, nada — diferente do I-24, este não chegou à produção: o `qa-adversarial` achou antes do `revisor-de-fronteiras` dar o parecer, e a V23 fechou o caso no mesmo ciclo da entrega.
+
+**Mas fica um aviso para quando o bot for escrito**, levantado pelo `revisor-de-fronteiras` ainda quente: a expressão `lower(regexp_replace(btrim(telegram_id), '^@', ''))` hoje aparece duas vezes — no índice e no `CHECK` — e isso é seguro porque as duas vivem no mesmo arquivo de migração e mudam juntas por construção. **O bot vai precisar de uma terceira cópia, em Java, para o lookup de "quem mandou esta mensagem"** — e essa não mora no mesmo arquivo. Se o lookup comparar `@Abner` contra o que o índice guarda (`abner`, sem `@`) sem normalizar do mesmo jeito, a busca não acha ninguém e o bot trata gente cadastrada como desconhecida. Quando o bot for escrito, o lookup tem de reaplicar exatamente esta expressão — ou chamar uma função no banco que a aplique, para não virar uma quarta cópia divergente.
+
+**Nota sobre B-D121:** `api.md` e o B-D121 afirmavam *"o índice único já impede duas contas apontando para o mesmo destino"* como premissa para dispensar verificação de posse. Antes da V21, essa frase não era totalmente verdadeira. A V21 **torna a premissa verdadeira; não revoga o B-D121** — a decisão de não verificar posse continua sendo a mesma decisão, agora apoiada num índice que cumpre o que dele se dizia.
+
+### A lição
+
+Campo novo com validação frouxa e índice único não herda de graça o cuidado que o campo irmão já tinha. `email` e `telegram_id` colidem pela mesma pergunta — "isto já existe, escrito de outro jeito?" — e só um dos dois tinha a resposta certa. Vale conferir os outros campos com índice único e validação flexível antes que um deles vire outro I-41.
+
+## I-42 — A regra "vazio vira NULL" só existia em Java, em duas cópias — **RESOLVIDO em 18/08/2026, na V23**
+
+### O sintoma
+
+`UPDATE usuario SET telegram_id = ''` na própria linha, executado como `raspybank_app` com identidade de sessão válida — ou seja, exatamente como o `PUT /api/perfil/telegram` executaria — era aceito sem erro.
+
+### A causa
+
+A regra "vazio vira `NULL`" (porque `ux_usuario_telegram` é índice parcial, e string vazia é valor real para ele) morava em **duas cópias de código-fonte**: `NULLIF(btrim(...), '')` na função de cadastro (V18) e o `trim()`/`isEmpty()` do `UsuarioServico`. Em **zero lugares do banco**. Nenhum `CHECK` garantia que a coluna nunca guardasse `''`.
+
+### O que o banco não pegou
+
+Um terceiro caminho de escrita — SQL manual, uma migração futura, um endpoint novo que esqueça de chamar o mesmo trecho de `UsuarioServico` — bastava para plantar `''` na coluna. A partir daí, a segunda pessoa que tentasse **limpar** o próprio campo (gravar `NULL` de verdade) bateria em 409 de duplicidade contra um valor que ninguém tinha digitado de propósito.
+
+### A correção (V23)
+
+`ck_usuario_telegram_identificavel`, com a mesma expressão normalizadora do índice: o critério não é "diferente de vazio", é "sobra alguma coisa depois de normalizar" — cobre `''`, `'   '` e `'@'` sozinho numa regra só, e vale para qualquer caminho de escrita, presente ou futuro, que passe pela coluna.
+
+### O que ficou pendente
+
+Nada — o `CHECK` fecha a classe inteira do defeito, não só o caminho testado.
+
+### A lição
+
+Regra de negócio que existe só em código de aplicação não é garantia, é convenção que dois autores diferentes têm que lembrar de repetir igual. O padrão do projeto (P3, migração antes de código; RLS no banco, nunca em `where` de Java) já dizia isto para outras superfícies; aqui a coluna tinha o índice mas não o `CHECK`, e a lacuna não apareceu até o `qa-adversarial` escrever um `UPDATE` direto.
+
+## I-43 — Três achados menores no contrato de `PUT /api/perfil/telegram` *(aberta — proporção, não esquecimento)*
+
+### Os três achados
+
+1. **Corpo `{}` (campo ausente) apaga o Telegram gravado.** `@Pattern`/`@Size` não reprovam `null`, e o serviço trata `null` como "limpar". Um `PUT` parcial que devia trocar outra coisa e esquecer o campo apaga o Telegram sem avisar. Sem impacto hoje porque só a tela do Perfil escreve neste endpoint, e ela sempre manda o campo.
+2. **`" abner_teste "` (com espaço nas pontas) responde 400.** O `@Pattern` roda **antes** do `trim()` do serviço — o `trim()` nunca é alcançado por essa porta. A tela salva porque faz `.trim()` no cliente antes de mandar; um consumidor que não fizer isso (o bot, batendo direto na API) recebe 400 num valor que devia ser aceito.
+3. **`@Size(max = 64)` promete 64; o `@Pattern` para em 63 sem o `@`.** Um valor de exatamente 64 caracteres sem `@` cai no `@Pattern` (limite 63) mesmo passando no `@Size`, e a mensagem de erro devolvida fala em "no máximo 64 caracteres" para um valor que tem 64 — a mensagem mente sobre o próprio limite.
+
+### Por que não consertar agora
+
+Nenhum dos três tem impacto hoje: só a tela do Perfil fala com o endpoint, e ela sempre manda o campo populado, sempre corta os espaços antes de mandar, e ninguém digita exatamente 64 caracteres sem perceber o aviso. Consertar agora mudaria comportamento que os próprios testes do `qa-adversarial` acabaram de documentar, sem um segundo consumidor para justificar a mudança.
+
+### Quando resolver
+
+Junto do trabalho do bot do Telegram — ele é o primeiro cliente que vai montar o corpo da requisição por programa, e é aí que os três param de ser hipotéticos: corpo parcial, valor sem `.trim()` prévio, e o limite de tamanho batendo em algum id longo de verdade.
+
+**Dono:** `api-e-contrato`.
 
 ---
 

@@ -51,6 +51,7 @@ Categoria e subcategoria **arquivam** (B-D4); conta **encerra** (F7); lançament
 | `POST` | `/api/auth/logout-todos` | Revoga todas as famílias do usuário |
 | `GET` | `/api/perfil` | Usuário, ambiente atual, canal, ambientes visíveis (filtrados por RLS). Devolve `telegramId` desde a V18 |
 | `PUT` | `/api/perfil/nome` | Troca o nome de exibição (B-D71) |
+| `PUT` | `/api/perfil/telegram` | Troca o `telegramId` do cadastro, ou apaga com valor vazio (B-D120, 18/08/2026) |
 | `PUT` | `/api/perfil/senha` | Troca a senha, exigindo a atual (B-D72) |
 | `POST` | `/api/sessao/ambiente` | Troca o ambiente ativo. **403** se não houver vínculo (B-T7) |
 
@@ -62,16 +63,29 @@ Categoria e subcategoria **arquivam** (B-D4); conta **encerra** (F7); lançament
 
 **Opcional.** É ele que vai ligar a pessoa ao bot (etapa 3 do roteiro); a coluna existe desde a V1 e o caminho de escrita chegou na V18.
 
-- **Vazio ou ausente vira `NULL`**, e isso não é detalhe: `ux_usuario_telegram` é um índice **parcial** (só não-nulos). String vazia gravada seria um valor *real* para o índice, e o segundo cadastro sem Telegram falharia por duplicidade num campo que ninguém preencheu.
-- **409** quando o mesmo Telegram já está em outra conta — duas contas apontando para o mesmo destino fariam o bot não saber para quem lançar.
+- **Vazio ou ausente vira `NULL`**, e isso não é detalhe: `ux_usuario_telegram` é um índice **parcial** (só não-nulos). String vazia gravada seria um valor *real* para o índice, e o segundo cadastro sem Telegram falharia por duplicidade num campo que ninguém preencheu. **Desde a V23, o `CHECK ck_usuario_telegram_identificavel` também recusa `'@'` sozinho e espaços puros** — o critério não é "diferente de vazio", é "sobra algo depois de normalizar" (I-42).
+- **409** quando o mesmo Telegram já está em outra conta — duas contas apontando para o mesmo destino fariam o bot não saber para quem lançar. **A partir da V23, a comparação é pela forma normalizada** (minúsculas, sem `@` inicial): `abner`, `ABNER` e `@abner` são o mesmo destino para o índice, e o 409 dispara mesmo quando a grafia enviada difere da já gravada. Antes da V23 não era assim — três grafias diferentes passavam como três contas distintas apontando para o mesmo Telegram (I-41).
 - **A validação é frouxa de propósito:** aceita o id numérico (`123456789`) e o usuário (`@abner`). O bot ainda não existe, e uma regra apertada agora tem chance de barrar justamente o valor certo; enquanto não há consumidor, valor errado não causa dano. Quando o bot chegar, ele aperta com a forma que exigir.
-- **Não existe caminho de edição ainda.** `GET /api/perfil` devolve o valor para conferência, e nada mais. Fica registrado como pendência pequena: quem digitar errado hoje não tem como corrigir sozinho.
+- **O caminho de edição chegou em 18/08/2026** — ver `PUT /api/perfil/telegram`, abaixo (B-D120). Isto supera parcialmente B-D105; o resto da decisão (validação frouxa, vazio vira `NULL`) segue valendo, agora nas duas bordas.
 
 ### `PUT /api/perfil/nome`
 ```json
 { "nome": "Abner" }
 ```
 Troca só o **nome de exibição** (B-D71). **O e-mail não tem endpoint de troca**, e a ausência é a proteção: é ele que faz login, e enquanto não existir recuperação de senha, um e-mail digitado errado trancaria a pessoa para fora da própria conta sem volta. Resposta: o mesmo corpo de `GET /api/perfil`, já atualizado.
+
+### `PUT /api/perfil/telegram` (B-D120, 18/08/2026)
+```json
+{ "telegramId": "123456789" }
+```
+Troca o `telegramId` gravado no cadastro. **Mesma validação do cadastro** (`@Size(max = 64)`, `@Pattern("|@?[A-Za-z0-9_]{3,63}")`): aceita o id numérico e o `@usuario`, pelo mesmo motivo de então — o bot ainda não existe, e uma regra apertada tem chance de barrar o valor certo. Duas bordas com regras diferentes para o mesmo campo seria divergência.
+
+- **Vazio limpa o campo** (grava `NULL`, não string vazia): `ux_usuario_telegram` é índice **parcial** — só sobre valores não-nulos —, e string vazia seria um valor real para ele; a segunda pessoa a limpar o campo bateria em duplicidade. Mesmo raciocínio do `NULLIF(btrim(...), '')` da V18, agora em Java porque aqui é `UPDATE` direto, não a função de cadastro. **Desde a V23 o banco também garante isto**, com `ck_usuario_telegram_identificavel`: mesmo que um caminho de escrita futuro esqueça a regra em Java, `''`, espaços puros e `'@'` sozinho não gravam (I-42) — a cópia em Java deixou de ser a única guarda.
+- **409** quando o valor já pertence a outra conta — o `TratadorGlobalDeErros` já reconhece a violação de `ux_usuario_telegram`. **Desde a V23, "já pertence" é pela forma normalizada** (I-41): gravar `@abner` quando já existe `ABNER` também dá 409.
+- **Sem migração e sem função `SECURITY DEFINER` nova para este endpoint especificamente.** A V8 revogou só o `SELECT` da coluna e manteve a escrita concedida; `pol_usuario_escrita` (V15) já casa `id = app_usuario_id()`, e no Perfil há identidade na sessão — o impasse que forçou a função no cadastro (V18) não existe aqui. Mesmo caso do B-D73 (troca de senha). **A V23 chegou depois, por um motivo diferente** — não por este endpoint, mas porque o `qa-adversarial` achou que o índice de baixo não cumpria o que esta seção já afirmava (I-41/I-42).
+- **Não há verificação de posse do valor** (B-D121). Quem digitar o Telegram de outra pessoa não recebe aviso: só o índice único impede duas contas apontando para o mesmo destino, e o bot simplesmente não reconhece quem digitou errado. Escolha, não pendência — e a V23 é o que torna essa frase literalmente verdadeira; antes dela, a garantia do índice tinha um furo (I-41).
+
+Resposta: o mesmo corpo de `GET /api/perfil`, já atualizado — igual a `PUT /api/perfil/nome`.
 
 ### `PUT /api/perfil/senha`
 ```json

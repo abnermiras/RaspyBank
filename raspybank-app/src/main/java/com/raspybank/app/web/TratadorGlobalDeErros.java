@@ -161,11 +161,18 @@ public class TratadorGlobalDeErros {
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
                     "erro", "Ja existe uma conta com este e-mail"));
             }
-            // O indice do telegram tambem e PARCIAL (so nao-nulos, V1): varias
-            // contas sem telegram convivem, e por isso a string vazia vira nulo
-            // no cadastro (V18). Este 409 e o caso real de duas pessoas — ou da
+            // O indice do telegram tambem e PARCIAL (so nao-nulos): varias
+            // contas sem telegram convivem. Desde a V23 ele e UNICO sobre a forma
+            // NORMALIZADA — lower(regexp_replace(btrim(...), '^@', '')) —, entao
+            // 'abner', 'ABNER' e '@abner' colidem entre si, que e o ponto: sao a
+            // mesma conta de Telegram. A V23 tambem levou a garantia do vazio
+            // para o banco (ck_usuario_telegram_identificavel), que antes so
+            // existia no Java. Este 409 e o caso real de duas pessoas — ou da
             // mesma pessoa duas vezes — apontando para a mesma conta de Telegram,
             // que faria o bot nao saber para quem lancar.
+            //
+            // O nome do indice e casado por string aqui: a V23 o recriou com o
+            // MESMO nome de proposito, senao esta violacao viraria 500.
             if (mensagem.contains("ux_usuario_telegram")) {
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
                     "erro", "Este Telegram ja esta ligado a outra conta"));

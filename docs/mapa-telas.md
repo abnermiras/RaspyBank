@@ -631,3 +631,14 @@ As duas frases do teto de 12 meses (§4s, `api.md` §6c) são cópia literal do 
 O menu lateral não muda — Relatórios entra como qualquer outro item —, mas a tela em si não respeita o ambiente ativo do topo (B-D117): o arquivo traz uma aba por ambiente do usuário, porque ele é o retrato da pessoa, e não da tela aberta. É a exceção que confirma B-D111 (o escopo de toda tela segue o ambiente ativo): aqui não há escopo de tela nenhum a seguir, porque não há grade para mostrar — só um arquivo para descrever antes de existir.
 
 **Verificado em 30/07/2026:** 229 testes verdes, com dois casos novos guardando o caso que ele achou — a pessoa com os **dois** acessos vendo um plástico no ambiente dela e todos no dele — e `make web-test` verde.
+
+## 19. Perfil ganha o formulário de Telegram (18/08/2026, B-D120)
+
+A T-09 (§14) tinha o campo só para conferência, e B-D105 tinha registrado a ausência de edição como custo pequeno. Ele foi olhar o Perfil em produção, o campo não estava lá, e pediu que estivesse.
+
+Bloco **"Alterar Telegram"**, entre o de nome e o de senha — mesma ordem da tabela de endpoints em `api.md`. Chama `PUT /api/perfil/telegram`.
+
+- Mesma validação frouxa do cadastro: aceita o id numérico e o `@usuario`.
+- Dica sob o campo: *"Digitou errado? Apague o campo e salve"* — é a tela explicando, na hora, que vazio limpa o valor em vez de ser rejeitado.
+- **Sem confirmação de posse** (B-D121): a tela não pergunta "tem certeza que isto é seu Telegram?" nem envia código nenhum. Digitar o de outra pessoa só falha quando o bot não reconhecer quem mandou mensagem — a tela não avisa antes disso.
+- **Achados do `qa-adversarial` deliberadamente não refletidos na tela** (I-43): corpo sem o campo apaga o valor, o campo com espaço nas pontas é rejeitado antes do `.trim()` do servidor (a tela já corta o espaço no cliente, por isso não aparece aqui), e o limite de 64 caracteres do `@Size` não bate com o do `@Pattern` sem `@`. Proporção — junto do bot, primeiro cliente que monta corpo por programa.
