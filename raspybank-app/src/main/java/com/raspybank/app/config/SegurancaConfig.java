@@ -1,24 +1,25 @@
 package com.raspybank.app.config;
 
 import com.raspybank.app.seguranca.FiltroAutenticacaoJwt;
+import com.raspybank.app.seguranca.PontoDeEntradaSemSessao;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 
 @Configuration
 public class SegurancaConfig {
 
     private final FiltroAutenticacaoJwt filtroJwt;
+    private final PontoDeEntradaSemSessao semSessao;
 
-    public SegurancaConfig(FiltroAutenticacaoJwt filtroJwt) {
+    public SegurancaConfig(FiltroAutenticacaoJwt filtroJwt, PontoDeEntradaSemSessao semSessao) {
         this.filtroJwt = filtroJwt;
+        this.semSessao = semSessao;
     }
 
     /**
@@ -77,7 +78,7 @@ public class SegurancaConfig {
                     "/mapa",
                     "/lancamentos",
                     "/categorias",
-                    "/contas", "/cartoes", "/perfil").permitAll()
+                    "/contas", "/cartoes", "/relatorios", "/perfil").permitAll()
 
                 // ATENCAO — unico curinga do arquivo, e ele e deliberado.
                 //
@@ -100,8 +101,18 @@ public class SegurancaConfig {
                 .anyRequest().authenticated())
 
             // Sem tela de login e sem redirecionamento: uma API responde 401.
-            .exceptionHandling(e -> e.authenticationEntryPoint(
-                new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+            //
+            // E com CORPO. O HttpStatusEntryPoint que morava aqui devolvia 401
+            // com zero bytes, contra a promessa global de B-T1 ("todo erro
+            // devolve {\"erro\": ...}"). Nao ha AccessDeniedHandler declarado
+            // porque a unica regra de autorizacao desta cadeia e
+            // `authenticated()`: quem passa por ela nunca leva 403 daqui. Os
+            // 403 do sistema nascem em outro lugar — o de B-D83 no
+            // FiltroAutenticacaoJwt, com o marcador `motivo` que a tela le —
+            // e ja saem em JSON. Regra de autorizacao nova (papel, escopo,
+            // @PreAuthorize) traz junto um AccessDeniedHandler, ou reabre este
+            // mesmo buraco no 403.
+            .exceptionHandling(e -> e.authenticationEntryPoint(semSessao))
 
             .addFilterBefore(filtroJwt, UsernamePasswordAuthenticationFilter.class);
 

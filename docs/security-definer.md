@@ -1,7 +1,7 @@
 # RaspyBank — Inventário de Funções SECURITY DEFINER
 
-**Versão:** 1.5
-**Data:** 30 de julho de 2026
+**Versão:** 1.6
+**Data:** 20 de agosto de 2026
 **Regra deste documento:** toda função `SECURITY DEFINER` é um furo **controlado** na política de Row Level Security. Cada uma existe por um motivo específico, registrado aqui. Criar uma nova exige adicionar a entrada correspondente no mesmo commit — função sem entrada neste inventário é dívida.
 
 ---
@@ -182,6 +182,19 @@ O escopo mínimo é o ponto: não devolve saldo, não devolve formas de pagament
 ### O que a V20 mudou
 - **`app_extrato_da_fatura`** ganhou o **ambiente por parâmetro** e passou a recortar por ele (B-D111). O ambiente não é palpite da tela: a função confere que ele é de quem chama antes de usar, senão o parâmetro viraria um jeito de pedir o recorte de um ambiente alheio. Foi `DROP` + `CREATE` — a lição da V19 sobre `RETURNS TABLE` já estava aprendida.
 
+## Funções da V22
+
+### `app_extrato_completo(inicio, fim)` — V22
+A quarta da família de `app_extrato_da_conta`, e o mesmo impasse: `pol_lancamento_ambiente` é `ambiente_id IN (SELECT app_ambientes_do_usuario())`, então consulta comum em `lancamento` **nunca** traz a linha alheia de uma conta ou de um plástico dividido. Isso está certo para a tela — a T-08 lista por consulta comum e por isso nunca mostra linha de outra pessoa. Mas o `.xlsx` da T-10 existe para **fechar com o extrato do banco** (B-D117): sem as linhas dela, a soma do arquivo diverge do que a T-05 mostra na mesma conta, e quem abre o arquivo conclui — com razão — que ele está errado.
+
+**É a única da lista SEM porteiro, e a ausência é o argumento.** Todas as irmãs começam com `IF p_alguma_coisa NOT IN (SELECT ...) THEN RAISE`, porque recebem um identificador que precisa ser conferido. Aqui os dois parâmetros são **datas**: não apontam para ninguém e não carregam autorização nenhuma. Não existe "peça o extrato de fulano" porque não existe parâmetro que diga fulano — tudo deriva de `app_usuario_id()`: os ambientes dele, os vínculos de conta dele, os plásticos liberados para ele. Sem identidade na sessão a função devolve **zero linha**, e o `IF app_usuario_id() IS NULL THEN RETURN` na primeira linha existe para dizer isso em voz alta, não porque as consultas precisem dele.
+
+**O que ela deixa passar, exatamente:** a linha de outra pessoa em conta ou plástico que eu alcance, com valor, data, conta, forma de pagamento, parcela e **quem** — e **sem** descrição, categoria e subcategoria, que são a máscara de B-D89/B-D97 e não saem do banco. Nada além dessas três é mascarado, porque valor e data são justamente o que faz a soma fechar.
+
+**O recorte por plástico é herdado da V20 (B-D110/B-D111), e sem ele a função vazaria.** Aceitar um plástico vincula a **conta do contrato** ao ambiente de quem recebeu (V19). Esse vínculo, sozinho, entregaria no arquivo dela as compras de **todos** os plásticos daquele cartão — mascaradas, mas com valor e data. É exatamente o que B-D106 tirou da tela. A regra aplicada é a mesma de `app_extrato_da_fatura`: no ambiente onde o cartão **nasceu**, tudo; nos outros, só os plásticos liberados **para aquele ambiente**. Conta comum não entra nessa conversa — lá o vínculo já diz tudo. Consequência assumida, idêntica à da V20: as duas pernas do pagamento da fatura não têm plástico (B-D59), então o pagamento feito pelo dono não aparece na aba de quem só recebeu um plástico — e está correto, porque ela não paga a fatura (B-D107).
+
+**`ambiente_da_aba` é a coluna que a máscara obriga a existir.** A linha alheia nasceu no ambiente da outra pessoa, e aquele ambiente não é aba nenhuma do meu arquivo. A aba dela é o ambiente **meu** pelo qual eu enxergo aquela conta, resolvido por `conta_ambiente` e preferindo `origem = true` — quando a conta nasceu num ambiente meu, é ali que o dinheiro dela mora para mim. Linha minha vai direto pelo `lancamento.ambiente_id` (B-D2).
+
 ## Funções de gatilho (V10)
 
 Caso à parte, pela razão explicada no critério: o registro que elas gravam precisa entrar mesmo quando o autor não tem identidade válida.
@@ -231,3 +244,4 @@ Grava no `outbox` na mesma transação do lançamento (F28). DEFINER pela mesma 
 | `app_compartilhamentos_do_plastico` | V19 | Com sessão | Com quem dividi este plástico |
 | `app_total_do_plastico` | V19 | Com sessão | O único número de fatura de quem recebeu |
 | `app_nome_do_banco_do_cartao` | V20 | Com sessão | Só o nome do banco, para agrupar na tela |
+| `app_extrato_completo` | V22 | Com sessão | O arquivo da T-10: atravessa **todos** os ambientes, e a única sem porteiro |

@@ -251,6 +251,14 @@ primeiro no ambiente de desenvolvimento**, e vai para o Pi num deploy conjunto d
 junto da correção de código, porque migração de schema é classe de risco diferente: o Flyway
 a aplica no deploy, e uma que falhe no meio impede o app de subir.
 
+**Atenção a quem pegar esta pendência: o número V21 já tem outros dois pretendentes.** A
+T-10 (§4s de `decisoes.md`) tomou o V21 para o extrato completo e cedeu para **V22** ao achar
+`V21__telegram_e_um_destino_so.sql` já em `origin`; o Telegram, por sua vez, terá de virar
+**V23** no merge (mesma seção). Este gatilho é o **terceiro** candidato ao número — hoje três
+migrações diferentes disputam "V21" e nenhuma delas é mais essa outra. Confira o estado das
+migrações (`decisoes.md` §6) antes de nomear o arquivo; o próximo número livre pode já ter
+mudado de novo.
+
 ### A lição
 
 O invariante que faltava não era sobre o cartão — era sobre **duas leituras do mesmo dado
@@ -551,6 +559,490 @@ tabela cresce sem limite até lá, ou se ganha alguma purga/arquivamento antes d
 **Quando resolver:** no início da extração do primeiro contexto para processo separado, ou
 antes disso se surgir o primeiro consumidor de eventos (ex.: bot do Telegram). Nenhum uso
 atual depende do relay, então nada bloqueia por causa deste item.
+
+---
+
+# Achados da leitura de 19/08/2026 — filtro de conta e cartão na T-08
+
+Origem: o mesmo relato que produziu B-D115 (`decisoes.md` §4r). A lacuna do filtro de conta
+foi corrigida com o seletor de cartão; este achado apareceu na mesma leitura, não é
+consertado agora, e fica registrado para não reaparecer como bug daqui a três meses.
+
+## I-31 — na T-08, o rodapé de totais não sinaliza que ele não é o extrato que fecha com o banco
+
+**Correção de rota.** Uma primeira versão deste achado comparava `app_saldo_da_conta` com
+`LancamentoRepositorio.buscar` e concluía que havia divergência sem decisão entre saldo e
+extrato numa conta compartilhada. Não há: é **B-D87** (`decisoes.md:376`) — *"Três consultas
+passam a atravessar ambientes; uma continua não atravessando"*. Saldo, extrato da conta
+(`app_extrato_da_conta`, usada por `ContaServico.extrato`, `ContaServico.java:246`, exposta em
+`GET /api/contas/{id}/extrato`) e total da fatura atravessam ambientes; o mapa não. **B-D96**
+(`decisoes.md:411`) nomeia as três funções com o mesmo porteiro na primeira linha
+(`conta_id IN (SELECT app_contas_do_usuario())`). Na T-05, onde saldo e extrato aparecem
+juntos, os dois atravessam e fecham entre si — não há o que resolver ali. E o **I-23**, na
+última seção, já registrou o mecanismo de explicação: a conta dividida vem com
+`compartilhada: true`, "e é essa marca que explica na tela por que o saldo é maior do que a
+soma dos lançamentos visíveis" (`inconsistencias.md:173`).
+
+O que sobrevive a B-D87 é bem menor, e é de tela, não de leitura.
+
+**O sintoma.** Na **T-08** (`Lancamentos.jsx:119,354-356`), o rodapé soma as linhas do mês
+**do ambiente ativo** (`somar(lista)`, sobre a lista que já veio recortada). Numa conta
+compartilhada, esse total nunca inclui os lançamentos que a outra pessoa fez no ambiente
+dela — e nada na tela diz isso. O comentário em `Contas.jsx:70-71` explica a diferença para
+quem lê o código; a T-08 não tem o equivalente para quem só olha a tela.
+
+**A causa.** É deliberada, não é defeito: o extrato do mês (`GET /api/lancamentos`) é o do
+ambiente e não atravessa — B-D87 e o Javadoc de `ContaServico.extrato`
+(`ContaServico.java:236-238`) dizem isso de propósito, e `ContaControlador.java:173-177`
+repete. O rodapé da T-08 apenas herda esse recorte, corretamente. O que falta não é mudar a
+conta — é a tela **apontar** que existe um número que fecha com o banco em outro lugar
+(`GET /api/contas/{id}/extrato`), do mesmo jeito que a T-05 aponta com `compartilhada: true`
+(I-23). A T-08 não tem marca equivalente.
+
+**O que o banco não pegou.** Nada pega — não é constraint nem política. É ausência de sinal
+na interface: o rodapé da T-08 não é o extrato que confere contra o banco, e nenhuma etiqueta
+diz isso a quem olha a tela.
+
+**O que falta.** Sinalização de tela na T-08 — por exemplo, indicar quando a conta filtrada é
+compartilhada e apontar o extrato da T-05 como o número que fecha. Não é decisão de leitura:
+B-D87 já decidiu que ler é assim.
+
+**Quando resolver:** sem dono e sem prazo — no próximo trabalho que toque a T-08.
+
+## I-32 — `LancamentoControlador.listar` não valida o `contaId` do filtro
+
+`LancamentoControlador.listar` (`LancamentoControlador.java:82-95`) passa o `contaId` do
+filtro direto ao serviço, sem validar. Um id inexistente, de outro ambiente, ou de conta
+encerrada devolve **200 com lista vazia**, indistinguível de "este mês não teve movimento".
+
+Não é vazamento: a RLS mais o recorte por `l.ambienteId` no serviço seguram. É pré-existente,
+não foi introduzido nesta entrega, e nenhuma decisão vigente exige validar id de **filtro** —
+a tabela de B-T1 governa recurso endereçado por caminho, não parâmetro de consulta.
+
+**O que o banco não pegou.** Nada pega — não é constraint nem política, é ausência de
+validação de borda.
+
+**Quando resolver:** junto da próxima fatia que mexer na T-08.
+
+---
+
+# Achados da investigação de 19/08/2026 — exclusão de parcela em produção
+
+## I-33 — Excluir uma parcela deixa o grupo de parcelamento incoerente
+
+### O relato (que não se sustentou)
+
+Relato do usuário: *"parcela 2/2 duplicada"*. Investigado com consultas de diagnóstico
+direto na base de **produção** (o Pi), em 19/08/2026. **Não há duplicação nenhuma** — a
+varredura por par `(grupo_parcelamento_id, parcela_numero)` repetido veio vazia na base
+inteira.
+
+O que o usuário viu na fatura de outubro foram duas linhas `2/2` de R$ 105,79 em
+05/10/2026, na mesma fatura — mas são **duas compras distintas** ("Petlove - internação
+Buzina" e "Petlove - internação Bubu", dois pets), cada uma parcelada em 2x, com mesmo
+valor no mesmo dia. É o mesmo padrão do I-24: o relato chegou com a causa embutida, e a
+causa era outra. Reforça a regra do CLAUDE.md — o relato é sintoma, não diagnóstico.
+
+### O que a base mostra
+
+Dois grupos de parcelamento com `parcela_total = 2` e **apenas 1 linha** cada:
+`34ebbe5e-6a2f-4d79-b3dc-19b25d4bd4b7` e `3b300e3f-5af5-4f08-a2a1-6007890a0003`. As
+sobreviventes (as parcelas `2/2`), ambas R$ 105,79, `data_caixa` 2026-10-05, na fatura
+`4b4089a3`: `744c0ce6` ("Buzina") e `351a6f23` ("Bubu").
+
+A trilha em `registro_auditoria` confirma que cada compra nasceu numa transação só
+(`criado_em` idêntico ao microssegundo entre a parcela 1 e a 2 — F23), o que descarta
+envio duplicado:
+
+```
+15:03:28.059131  CRIACAO   a63477d5  ┐ mesma transação (compra Buzina)
+15:03:28.059131  CRIACAO   744c0ce6  ┘
+15:03:55.664503  CRIACAO   351a6f23  ┐ mesma transação (compra Bubu)
+15:03:55.664503  CRIACAO   a13e1f33  ┘
+15:04:32         CRIACAO   b68c5cd8    (Amazon PetFarmacia, não parcelado)
+15:05:14         EXCLUSAO  b68c5cd8
+15:05:16         EXCLUSAO  a13e1f33    (parcela 1/2 de Bubu)
+15:05:18         EXCLUSAO  a63477d5    (parcela 1/2 de Buzina)
+```
+
+As três linhas excluídas tinham `data_caixa` 2026-09-05 — a fatura de setembro. Foram
+exclusões **individuais e deliberadas**, com 2 segundos de intervalo entre elas; a hipótese
+em aberto é mau uso — o usuário quis limpar a fatura de setembro e não percebeu que estava
+partindo compras parceladas ao meio. O `estado_anterior` da auditoria guarda os 23 campos
+de cada linha apagada, então a reconstrução fiel é possível.
+
+### A causa
+
+`LancamentoServico.excluir` (`raspybank-lancamento/src/main/java/com/raspybank/lancamento/servico/LancamentoServico.java:612-613`)
+apaga o lançamento e nada mais. Nenhuma menção ao grupo. Tira-se uma parcela de um grupo de
+duas e sobra uma linha declarando `2/2` num grupo que só tem uma linha.
+
+O javadoc do método, logo acima dele, afirma o contrário em voz alta:
+
+> Pode, porque nada aponta para ele: apagar um lancamento nao deixa nenhuma outra linha
+> orfa, e o saldo simplesmente volta a ser a soma do que restou.
+
+Era verdade na V10 e **deixou de ser na V12**: o `grupo_parcelamento_id` é uma linha
+apontando para outra. O comentário nunca foi revisitado quando o cartão chegou, e hoje ele
+autoriza exatamente a operação que quebra a invariante. Isso é parte do achado, não
+detalhe — comentário que afirma uma garantia envelhece junto com o modelo, e um comentário
+desatualizado que autoriza a operação errada é pior que nenhum comentário.
+
+B-D55 assumiu esse custo por escrito: *"o `grupo_parcelamento_id` não tem tabela-alvo,
+então não há FK garantindo o grupo — é identificador de correlação, e a integridade dele
+fica na aplicação"*. A aplicação não a mantém. Este achado é a fatura desse custo chegando.
+
+### O que o banco não pegou
+
+Nada — e não por descuido. O `CHECK` da V12
+(`raspybank-app/src/main/resources/db/migration/V12__cartao_de_credito.sql:292-296`) valida
+a coerência do **trio dentro de uma linha** (grupo/número/total juntos, ou todos nulos). O
+índice `ix_lancamento_grupo_parcelamento` (mesma migração, linhas 299-300) **não é único** —
+não precisaria ser, várias linhas do mesmo grupo são o desenho normal. A invariante violada
+é **entre linhas** (`count(*) do grupo == parcela_total`), e isso não cabe em `CHECK`: o
+Postgres não aceita subconsulta ali. Só gatilho pegaria. Se a garantia deve migrar para o
+banco (gatilho) ou ficar no serviço é parte da decisão em aberto.
+
+### A correção — em aberto, nada foi feito
+
+Nem código nem dado foram tocados. O usuário decidiu **pendurar o assunto**, e falta a
+decisão de produto:
+
+**Excluir a parcela `1/n` deve apagar o grupo inteiro, ou só a linha em tela?** As
+alternativas na mesa: apagar o grupo todo (com confirmação dizendo quantas linhas e quanto
+some), ou renumerar as sobreviventes (`2/2 → 1/1`). Renumerar reescreve o passado — passa a
+afirmar que a compra foi de R$ 105,79 em 1x quando foi de R$ 211,58 em 2x, e erra em
+silêncio o limite consumido, que existe para bater com o app do banco (B-D48).
+
+**A pergunta que trava a decisão**, levantada pelo usuário: o que apagar o grupo faz com a
+parcela que já foi paga? Ela tem âncora — B-D113 define "parcela paga" com precisão: a
+compra é `REALIZADO` se, e somente se, a fatura dela estiver fechada e quitada. Logo não é
+uma decisão só: é uma para parcelas em fatura aberta e outra para as que caíram em fatura
+já conferida contra o banco. Mexer no total de uma fatura quitada é o que B-D65 recusou em
+outro contexto (encerrar cartão não some com o passado).
+
+**Dado de produção:** os dois grupos órfãos continuam incoerentes no Pi. O conserto
+depende da intenção do usuário ao excluir (se era apagar as compras inteiras, apaga-se
+também as `2/2`; se era só limpar a fatura de setembro, recriam-se as `1/2` a partir do
+`estado_anterior`). É correção manual como `raspybank_owner`, **não** migração Flyway —
+Flyway é schema, não dado de uma instalação.
+
+### Estado
+
+Aberto, **sem dono e sem prazo** — pendurado por decisão do usuário em 19/08/2026. Quando
+for retomado, a ordem é: decisão registrada em `docs/decisoes.md` → `qa-adversarial` com o
+teste vermelho → `dominio-lancamento` (serviço e javadoc) → eventual gatilho por
+`banco-e-migracoes` → revisor → `make gate`.
+
+### A lição
+
+Duas, e as duas valem: (a) custo assumido em decisão ("a integridade fica na aplicação") é
+dívida com vencimento, não isenção — B-D55 previu exatamente este buraco e ninguém voltou
+para tapá-lo; (b) comentário que afirma uma garantia envelhece junto com o modelo, e
+comentário desatualizado que autoriza a operação errada é pior que comentário ausente.
+
+---
+
+# Achado da entrega de 20/08/2026 — T-10, extrato completo
+
+## I-34 — O plano da T-10 vazaria os plásticos alheios de um cartão dividido — **RESOLVIDO em 20/08/2026, antes de chegar à produção**
+
+Diferente do I-24 e do I-33, este não veio de um relato de uso: foi encontrado na revisão do
+plano de implementação, contra o que a V19/V20 já garantiam na tela. Fica registrado no
+mesmo formato dos outros dois porque a lição é reutilizável — a próxima função
+`SECURITY DEFINER` sobre lançamento pode cometer o mesmo erro, e nenhum teste de schema o
+acusaria.
+
+### O sintoma
+
+Não houve sintoma em produção. O sintoma foi textual: o plano de execução (`docs/desenho-t10-relatorios.md` e a instrução de implementação da V22) mandava resolver `ambiente_da_aba` da linha alheia só a partir de `conta_ambiente`, **preferindo `origem = true`** — a mesma regra que `app_extrato_da_conta` (V16) usa para uma conta comum dividida.
+
+### A causa
+
+Conta comum e conta de cartão não têm a mesma forma de vínculo. Aceitar um **plástico**
+vincula a **conta do contrato inteiro** ao ambiente de quem recebeu (`V19__compartilhamento_por_plastico.sql:226`,
+função `app_aceitar_convite_de_plastico`) — é assim que o lançamento dela tem onde morar
+(chave composta de B-D2). A V19/B-D106 fez dessa vinculação uma **consequência** do
+recebimento de um plástico, não mais a **concessão**: quem recebeu um cartão vê só os
+plásticos liberados para ela, nunca os dez do contrato.
+
+A regra "preferindo `origem = true`" ignora essa diferença. Aplicada como estava escrita, o
+extrato da T-10 entregaria, na aba de quem recebeu **um único** plástico, uma linha para
+**cada compra de todos os plásticos daquele cartão** — mascaradas (sem descrição nem
+categoria, pela regra de B-D89), mas com valor, data, conta e quem. É exatamente o que
+B-D106 tirou da tela e o que B-D110 recusa em palavras: *"ela vê o extrato do PLÁSTICO
+dela, não o do contrato"*.
+
+### O que o banco não pegou
+
+Nada — e a razão importa mais que o achado em si. Nenhuma `CHECK`, `FK` ou política de RLS
+impediria a versão errada: a política de `lancamento` estava e continua correta, e a função
+proposta é `SECURITY DEFINER` **por definição** — ela existe justamente para atravessar a
+política. Um teste de schema não vê a diferença entre a consulta certa e a errada, porque
+as duas são sintaticamente válidas e as duas *compilam* contra o mesmo banco. A única
+defesa possível é alguém comparar a consulta nova contra o modelo de negócio (B-D106) antes
+dela virar SQL.
+
+### A correção (aplicada na V22, antes de qualquer deploy)
+
+`app_extrato_completo` reproduz a mesma regra de `app_extrato_da_fatura` (V20): a linha
+alheia entra na minha aba quando `origem = true` **OU** a conta não é de cartão **OU** o
+plástico está liberado para o meu ambiente (`app_emitidos_liberados`, V19). Conta comum
+continua resolvendo por `origem` sozinho — ali o vínculo já diz tudo, porque não existe
+unidade menor que a conta. Detalhe em `docs/security-definer.md`, seção "Funções da V22".
+
+### O que ficou pendente
+
+Nada no código desta entrega. A pendência é de processo: **toda função `SECURITY DEFINER`
+nova que liste lançamento de conta compartilhada precisa reproduzir o recorte por plástico
+quando a conta puder ser de cartão** — e isso não é verificável por teste de schema, só por
+revisão contra `decisoes.md` §4n/§4o. Vale conferir as três funções existentes
+(`app_extrato_da_conta`, `app_saldo_da_conta`) contra este critério na próxima vez que
+alguma delas for tocada; não foram revisadas de novo aqui porque nenhuma mudou.
+
+### A lição
+
+O impasse de uma `SECURITY DEFINER` nova não é só "ela atravessa a RLS" — é "ela precisa
+redecidir, em SQL, uma regra de negócio que em outro lugar do sistema é imposta por uma
+combinação de tabelas diferentes". Copiar a regra de uma irmã parecida (conta comum) sem
+conferir se a irmã se aplica ao caso novo (conta de cartão) é como copiar um `WHERE` que
+parece certo e não é — a diferença só aparece quando alguém sabe a história por trás da
+V19, e é por isso que este documento existe.
+
+---
+
+# Achados do `qa-adversarial` de 20/08/2026 — T-10, extrato completo (segunda passada)
+
+Origem: os testes escritos contra o plano da T-10, antes de qualquer relato de uso — mesma
+classe do I-34: código examinado antes do primeiro byte real chegar a alguém. Os dois abaixo
+são independentes entre si e independentes do I-34.
+
+## I-35 — Nome de aba duplicado sumia com um ambiente inteiro do `.xlsx`, sem aviso — **RESOLVIDO em 20/08/2026, antes de chegar a produção**
+
+### O sintoma
+
+Dois ambientes com o **mesmo nome** produziam duas abas com o mesmo `<sheet name="…">` no
+OOXML. O formato exige nome único: o Excel recusa a pasta inteira, e uma leitora mais
+tolerante fica só com a primeira das duas — um ambiente inteiro desaparecendo do extrato,
+sem nenhuma mensagem.
+
+### A causa
+
+A unicidade era decidida sobre uma string **diferente da que chegava no arquivo**. O corte de
+31 caracteres era feito em `char` Java, e um emoji caindo bem na posição 30 era partido ao
+meio; o `fastexcel` **descarta em silêncio** o que não é XML 1.0 válido — confirmado no
+bytecode, `XmlEscapeHelper.appendEscapedCodePoint` faz `return` puro para o meio par
+surrogate que sobra do corte. Dois nomes de ambiente diferentes, depois desse descarte,
+podiam virar o mesmo texto gravado — e o desempate acontecia **antes** de saber disso.
+
+### O que o banco não pegou
+
+Nada — e não tinha como pegar. O nome da aba não é dado gravado; nasce da formatação, na
+hora de montar o arquivo. O que faltava não é constraint nenhuma: é **conferência no
+escritor**, que simplesmente não existia. É uma família de defeito que nenhuma `CHECK`
+alcança — invariante sobre dado **derivado na saída**, não sobre o que está na tabela.
+
+### A correção (aplicada em 20/08/2026)
+
+A regra "o que pode virar nome de aba" mudou de dono: passou a morar em `EscritorXlsx`
+(`raspybank-app/src/main/java/com/raspybank/app/servico/EscritorXlsx.java`), porque é
+propriedade do **formato** — deixá-la no montador faria cada relatório futuro redescobri-la
+sozinho. O escritor deixou de descartar em silêncio: agora **confere todos os nomes antes do
+primeiro byte** (`conferirNomes`) e recusa a planilha inteira se algum nome vier vazio, se
+algum nome não for **idêntico** ao próprio saneamento (`nomeDeAbaSaneado`), ou se duas abas
+colidirem ignorando caixa. A conferência é antes de abrir a pasta de propósito: estourar na
+quarta aba entregaria um `.xlsx` truncado, que é pior de diagnosticar do que um erro limpo
+antes de começar.
+
+Do lado de quem chama, `ExtratoCompletoMontador.saneado()` passou a rodar **antes** do
+desempate (`unico()`), e não depois — é o próprio texto final que entra no conjunto de
+nomes usados, e não um texto intermediário que o escritor ainda ia mudar por baixo.
+
+**Três casos latentes** que o mesmo defeito cobria, e que só apareceram ao escrever o teste
+vermelho:
+
+1. Ambiente cujo nome fosse **só** um surrogate solto produzia `<sheet name="">` — e uma
+   aba sem nome faz a **pasta inteira** deixar de abrir, pior que o caso original.
+2. `unico()` tinha a **segunda cópia** do mesmo bug, no corte que abre espaço para o sufixo
+   `(2)` quando dois nomes colidem depois do corte de 31.
+3. Caractere de controle no meio do nome (ex.: um ambiente digitado com um tab perdido no
+   meio) virava um nome diferente do que a pessoa via na tela, e podia colidir com um
+   ambiente realmente chamado assim.
+
+Guardado por `ExtratoCompletoNomeDeAbaTest`.
+
+### A lição
+
+Quando a aplicação desempata nomes, ela precisa desempatar **o texto final** — o que o
+formato realmente vai gravar —, nunca um texto intermediário que ainda vai passar por outro
+corte ou descarte antes de virar bytes. É a mesma lição do I-24 (duas leituras do mesmo dado
+discordando em silêncio), aplicada à escrita: aqui eram duas *decisões* sobre o mesmo dado
+— desempatar e escrever — discordando sobre qual string era a de verdade.
+
+## I-36 — O 401 respondia com corpo vazio, em todo endpoint protegido, desde sempre — **RESOLVIDO em 20/08/2026**
+
+Diferente do I-35: **não é defeito da T-10**, é do sistema inteiro, e a T-10 só o expôs.
+
+### O sintoma
+
+Todo `401` de sessão ausente ou expirada respondia com **zero bytes** — em qualquer endpoint
+fora de `/api/auth/**`, desde a Fase 4. `docs/api.md` promete, na §1 (B-T1), `{"erro": …}`
+para todo erro; a promessa era falsa há semanas, e ninguém tinha percebido porque nenhum
+teste conferia o **corpo** de um 401 — só o status.
+
+### Como apareceu
+
+A T-10 acrescentou, na §6c de `docs/api.md`, a linha `401 | sem token, ou token expirado |
+corpo é JSON de erro, nunca um .xlsx vazio`. O `qa-adversarial` escreveu o teste que cobrava
+essa linha, dentro de `ExtratoCompletoFaixaTest` — e ele falhou contra o código como estava.
+A entrega documentou o contrário do que o sistema fazia, e o teste pegou a divergência antes
+de ela virar arquivo `.xlsx` de zero byte na pasta de downloads de alguém.
+
+**Onde a prova mora hoje.** Ela mudou de endereço logo depois, pela observação O5 do
+`revisor-de-fronteiras`: o contrato do corpo do 401 é do sistema inteiro, e deixá-lo provado
+só dentro da T-10 significava que apagar a T-10 levaria junto a prova de algo que não é dela.
+A forma do corpo é conferida em `AutenticacaoFluxoTest` (`assertCorpoDo401`, comparação **byte
+a byte** — `assertNotNull(get("erro"))` passaria com o acento gravado em Latin-1); o que ficou
+em `ExtratoCompletoFaixaTest` é só o modo de falha do endpoint binário, que o 401 não saia com
+`Content-Type` de planilha nem como `.xlsx` truncado.
+
+### O que o banco não pegou
+
+Nada — é contrato HTTP, não dado gravado. O que faltava era um teste que conferisse **corpo**
+de 401, e não só `getStatusCode()`. Os testes de 401 pré-existentes conferiam só o status:
+`CategoriaApiTest`, `ContaApiTest`, `CartaoApiTest`, `LancamentoApiTest`,
+`MapaDeGastosApiTest`, `FormaPagamentoApiTest`, `TransferenciaApiTest`, `PerfilApiTest` — nem
+um deles teria acusado o corpo vazio, porque nenhum olhava para ele.
+
+### A correção (aplicada em 20/08/2026)
+
+Classe nova, `PontoDeEntradaSemSessao`
+(`raspybank-app/src/main/java/com/raspybank/app/seguranca/PontoDeEntradaSemSessao.java`),
+registrada em `SegurancaConfig` no lugar do `HttpStatusEntryPoint` do Spring Security (que
+por natureza responde sem corpo). Devolve, para token ausente, malformado **ou** expirado —
+os três indistintamente, de propósito —
+`{"erro":"Sessão expirada ou ausente. Entre novamente."}`, `Content-Type:
+application/json;charset=UTF-8`. Sem `WWW-Authenticate`: o cabeçalho faria o navegador abrir
+a caixa de usuário/senha dele por cima da tela do sistema. Detalhe registrado em
+`docs/api.md` §1.
+
+### O que ficou pendente
+
+Nada de código. Fica o alerta de processo: regra de autorização nova nesta cadeia (papel,
+escopo, `@PreAuthorize`) precisa trazer junto um `AccessDeniedHandler` — hoje não existe
+porque a única regra desta cadeia é `authenticated()`, e quem passa por ela nunca leva 403
+daqui. Sem o handler, o mesmo buraco reabre para o 403.
+
+### A lição
+
+Teste que confere status e não confere corpo é metade de teste, para um contrato que promete
+os dois. A promessa de `docs/api.md` — "todo erro devolve `{"erro": …}`" — vale desde
+B-T1/B-T2 e nunca tinha sido verificada de ponta a ponta; bastou um teto novo (a T-10) exigir
+o corpo explicitamente para o buraco antigo aparecer.
+
+---
+
+# Achados do `revisor-de-fronteiras` sobre o commit `08d7226` (20/08/2026) — T-10, extrato completo
+
+Origem: parecer de fronteiras sobre a entrega que fechou §4s. **O parecer foi limpo, sem
+bloqueante** — os quatro itens abaixo são dívidas conhecidas, não defeito ativo, e nenhum
+impediu o commit. Formato leve, porque não há sintoma nem correção: é achado em aberto, não
+o formato completo do I-24.
+
+O parecer também **confirmou** três garantias que valem registrar como ficaram escritas, não
+como pendência: o recorte por plástico da V22 não tem caminho de fuga (`cartao.conta_id` é
+`PRIMARY KEY` — `V12__cartao_de_credito.sql:100` — então `ct.conta_id IS NULL` só é verdadeiro
+para conta que **não** é cartão; `ux_ca_uma_origem` — `V16__compartilhamento_de_conta.sql:75`
+— garante uma origem por conta; e o `CROSS JOIN LATERAL` de `app_extrato_completo`
+(`V22__extrato_completo.sql:220`) **corta em vez de deixar passar** quando nenhum vínculo
+sobrevive ao recorte — o modo de falha é "some", não "vaza"); a máscara está completa
+(`lancamento` tem exatamente duas colunas de texto livre, `descricao`, mascarada, e
+`observacao`, que não sai da função); e B-D117 está contido (`app_extrato_completo` tem um
+único chamador em todo o código de produção).
+
+## I-37 — Rótulo de apresentação da forma de pagamento mora num controlador, e o montador do extrato importa `..web..` para usá-lo
+
+`FormaPagamentoControlador.Item.nomeDe` (`FormaPagamentoControlador.java:77`) é
+`public static`, e `ExtratoCompletoMontador` — que está em `..app.servico..` — importa
+`..app.web..` para chamá-lo (`ExtratoCompletoMontador.java:5,370`). É a camada ao contrário:
+serviço dependendo de borda HTTP.
+
+**Por que não foi consertado.** Nenhuma decisão vigente sustenta a objeção. O
+`ArquiteturaTest` policia módulo contra módulo, e sua única regra intra-módulo é `..web..` não
+depender de `..repositorio..`; `docs/decisoes.md` não diz nada sobre a direção entre
+`app.web` e `app.servico`; os dois pacotes estão no mesmo módulo e nenhum contexto de negócio
+foi atravessado. A alternativa que existia — uma terceira cópia da lista de rótulos — é pior,
+e o javadoc daquele controlador diz explicitamente para não fazê-la.
+
+**A saída recomendada.** Extrair os rótulos para uma classe em `..app.servico..`; controlador
+e montador passam a chamá-la, e a seta vira `web → servico`, que é a direção natural.
+
+**A saída que parece mais limpa, e tem armadilha.** `FormaPagamento.rotulo()` no enum, em
+`raspybank-lancamento`. P2 diz *"sem campo paralelo, sem conversor"*, e um `rotulo()` no enum
+é exatamente a forma que alguém vai citar daqui a um ano como precedente para um campo
+paralelo. Se for por aí, exige decisão registrada dizendo que rótulo de tela não é conversor
+de persistência.
+
+**Descartada.** Mover o montador para `..app.web..`. Ele é `@Transactional(readOnly=true)` e
+injeta `EntityManager` (`ExtratoCompletoMontador.java:159,225`); mover trocaria um ciclo
+cosmético por acesso transacional a dado dentro do pacote da borda, que é o que a regra
+`controladorNaoUsaRepositorio` existe para impedir.
+
+**Quando resolver:** na próxima vez que a lista de rótulos de forma de pagamento mudar, ou
+antes disso se a decisão sobre `web → servico` for registrada por outro motivo.
+
+## I-38 — A conexão fica presa durante a transmissão do `.xlsx` do extrato completo
+
+`RelatorioControlador` escreve no `OutputStream` da resposta dentro do `@Transactional` do
+montador. O javadoc já assume o preço, e o tratamento de `isCommitted()`/`reset()` está
+correto. Duas consequências não estavam escritas em lugar nenhum:
+
+1. A conexão fica `idle in transaction` durante o download, segurando o horizonte de `xmin` e
+   impedindo o autovacuum de limpar tuplas mortas de `lancamento` e `registro_auditoria`
+   naquele intervalo. Irrelevante em 76 ms de download típico; **deixa de ser se o teto de 12
+   meses (B-D116) subir algum dia** — esse é o gatilho a vigiar.
+2. Se alguém configurar `idle_in_transaction_session_timeout` no Pi — coisa que se faz sem
+   pensar em endpoint binário — o download morre no meio e produz exatamente o `.xlsx`
+   truncado que a §6c de `docs/api.md` descreve como modo de falha aceito. O sintoma vai
+   apontar para o lugar errado (parece defeito do escritor ou da rede, não configuração de
+   banco), e é por isso que precisa estar escrito aqui.
+
+**Quando resolver:** não é ação pendente, é vigilância. Revisitar se o teto de 12 meses subir,
+ou se algum dia o Pi ganhar `idle_in_transaction_session_timeout` configurado.
+
+## I-39 — O 401 JSON de `PontoDeEntradaSemSessao` (I-36) alcança toda a cadeia de segurança, não só `/api/**`
+
+O `PontoDeEntradaSemSessao` vale para toda a cadeia de segurança, não só a API. Efeito: quem
+digitar uma URL desconhecida no navegador agora vê `{"erro":"Sessão expirada ou ausente.
+Entre novamente."}` cru na tela, em vez de página em branco.
+`TelasEstaticasTest.caminhoNaoLiberadoNemChegaAoDisco` (`TelasEstaticasTest.java:111`,
+"Caminho fora da lista responde 401") continua verde — o teste confere status e a ausência de
+vazamento de existência, não a experiência de quem só queria ver uma tela.
+
+Não contraria decisão nenhuma — B-T1 pede corpo em todo erro, e isso é um erro. Registro como
+a única consequência do I-36 que ninguém tinha escrito, para quem topar com ela no navegador
+não achar que é defeito novo.
+
+**Quando resolver:** só se a experiência de erro de navegação (URL digitada errada, link
+quebrado) virar pauta de produto. Não bloqueia nada hoje.
+
+## I-40 — `MigracoesTest` não confere `search_path` das funções SECURITY DEFINER
+
+**A mais valiosa das quatro, e é pré-existente** — não nasceu com a T-10, só apareceu na
+revisão dela. `MigracoesTest.inventarioSecurityDefinerConfere` (`MigracoesTest.java:180-204`)
+compara os nomes das funções `SECURITY DEFINER` com o inventário e para aí. Nada quebra o
+build se a próxima função nascer **sem `SET search_path`** — que é a falha mais perigosa e
+mais silenciosa dessa família: uma função `SECURITY DEFINER` sem `search_path` fixo pode ser
+sequestrada por um schema no caminho de busca.
+
+A V22 tem `SET search_path = public, pg_temp` (`V22__extrato_completo.sql:104`), e todas as
+funções atuais têm — **não há defeito hoje**. O que falta é a guarda: um
+`AND p.proconfig IS NOT NULL` na mesma consulta do teste fecharia a lacuna, no espírito da
+terceira pergunta do formato do I-24 — aqui, o que o *teste* não pega, não o que o código
+errou.
+
+**Quando resolver:** na próxima vez que `MigracoesTest` for tocado, ou antes da primeira
+função `SECURITY DEFINER` escrita por alguém que não conheça esta convenção.
 
 ---
 

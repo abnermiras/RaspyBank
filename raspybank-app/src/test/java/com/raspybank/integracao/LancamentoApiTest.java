@@ -57,6 +57,13 @@ class LancamentoApiTest extends IntegracaoTest {
     private static String previstoId;
     private static String mesDoPrevisto;
 
+    private static String bancoDoCartaoId;
+    private static String cartaoId;
+    private static String plasticoId;
+    private static String compraNoCartaoId;
+    private static String lancamentoNoBancoId;
+    private static String mesDaCompra;
+
     // =========================================================================
 
     @Test
@@ -370,6 +377,136 @@ class LancamentoApiTest extends IntegracaoTest {
     }
 
     // =========================================================================
+    // O seletor de cartao da T-08 — o mesmo parametro contaId, o id do cartao
+    // =========================================================================
+    //
+    // O seletor de CONTA e alimentado por ContaRepositorio.bancariasDoAmbiente,
+    // que exclui conta de proposito CARTAO (B-D62). Mas a compra no cartao grava
+    // contaId = conta do CARTAO, e o filtro do repositorio e igualdade crua.
+    // Resultado: nenhuma opcao do seletor de conta alcanca uma compra de cartao.
+    //
+    // A tela ganha um seletor de CARTAO ao lado, e ele manda no MESMO parametro
+    // contaId o id do cartao — que e literalmente o contaId dele, porque Cartao
+    // usa contaId como chave primaria (F5 / B-D47). Estes quatro testes travam
+    // o contrato do qual essa tela passa a depender.
+
+    @Test
+    @Order(16)
+    @DisplayName("A compra no cartao mora na conta do CARTAO, e o id do cartao e essa conta (F5/B-D47)")
+    void compraNoCartaoMoraNaContaDoCartao() throws Exception {
+        Map<String, Object> banco = new HashMap<>();
+        banco.put("nome", "Nubank do filtro");
+        banco.put("natureza", "ATIVO");
+        banco.put("formasPagamento", List.of("DEBITO", "PIX"));
+        banco.put("padraoSaida", "DEBITO");
+
+        ResponseEntity<Map> contaBanco = postAutenticado("/api/contas", banco);
+        assertEquals(HttpStatus.CREATED, contaBanco.getStatusCode());
+        bancoDoCartaoId = String.valueOf(contaBanco.getBody().get("id"));
+
+        ResponseEntity<Map> cartao = postAutenticado("/api/cartoes", Map.of(
+            "contaBancoId", bancoDoCartaoId,
+            "nome", "Black",
+            "limite", "10000.00",
+            "diaVencimento", 18,
+            "finalDoCartao", "4352"));
+
+        assertEquals(HttpStatus.CREATED, cartao.getStatusCode());
+        cartaoId = String.valueOf(cartao.getBody().get("id"));
+        plasticoId = String.valueOf(
+            ((List<Map<String, Object>>) cartao.getBody().get("emitidos")).get(0).get("id"));
+
+        // A compra vai como a tela manda: o BANCO no contaId mais o plastico
+        // (B-D61). Quem redireciona para a conta do cartao e o servidor.
+        Map<String, Object> compra = new HashMap<>();
+        compra.put("contaId", bancoDoCartaoId);
+        compra.put("cartaoEmitidoId", plasticoId);
+        compra.put("categoriaId", mercadoId);
+        compra.put("valor", "250.00");
+        compra.put("dataCaixa", HOJE.toString());
+        compra.put("dataCompetencia", HOJE.toString());
+        compra.put("descricao", "Compra no cartao");
+
+        ResponseEntity<Map> registrada = postAutenticado("/api/lancamentos", compra);
+        assertEquals(HttpStatus.CREATED, registrada.getStatusCode());
+
+        compraNoCartaoId = String.valueOf(registrada.getBody().get("id"));
+        assertNotNull(registrada.getBody().get("faturaId"), "Compra de cartao nasce presa a fatura");
+
+        // A data de caixa da compra e o VENCIMENTO da fatura (F14) — que pode
+        // cair no mes seguinte. O mes do recorte vem da resposta, nunca de
+        // supor que compra feita hoje aparece no extrato de hoje.
+        String dataDaCompra = String.valueOf(registrada.getBody().get("dataCaixa"));
+        mesDaCompra = dataDaCompra.substring(0, 7);
+
+        // A resposta mostra o BANCO na coluna conta (B-D61) — e exatamente por
+        // isso o id que a linha guarda nao pode ser lido dali.
+        var contaMostrada = (Map<String, Object>) registrada.getBody().get("conta");
+        assertEquals(bancoDoCartaoId, String.valueOf(contaMostrada.get("id")),
+            "A tela le 'Nubank · Black ****4352': quem aparece e o banco");
+
+        assertEquals(cartaoId, contaIdGravadoDe(compraNoCartaoId),
+            "O que a linha guarda e a conta do CARTAO — e o id do cartao e ela mesma");
+
+        // O vizinho de controle: mesmo mes, mesma conta escolhida no formulario,
+        // sem cartao nenhum.
+        Map<String, Object> noBanco = new HashMap<>();
+        noBanco.put("contaId", bancoDoCartaoId);
+        noBanco.put("categoriaId", mercadoId);
+        noBanco.put("valor", "31.90");
+        noBanco.put("dataCaixa", dataDaCompra);
+        noBanco.put("descricao", "Tarifa do banco");
+
+        ResponseEntity<Map> tarifa = postAutenticado("/api/lancamentos", noBanco);
+        assertEquals(HttpStatus.CREATED, tarifa.getStatusCode());
+        lancamentoNoBancoId = String.valueOf(tarifa.getBody().get("id"));
+    }
+
+    @Test
+    @Order(17)
+    @DisplayName("Filtrar pelo id do cartao traz as compras dele, e so elas")
+    void filtroPeloCartaoTrazAsComprasDoCartao() {
+        var doCartao = listar("?mes=" + mesDaCompra + "&contaId=" + cartaoId);
+
+        assertTrue(contem(doCartao, compraNoCartaoId),
+            "O seletor de cartao manda o id do cartao no mesmo parametro contaId,"
+                + " e ele e o contaId da compra");
+        assertTrue(doCartao.stream().noneMatch(l -> l.get("faturaId") == null),
+            "Tudo que mora na conta do cartao esta preso a uma fatura");
+        assertTrue(contemNenhum(doCartao, lancamentoNoBancoId),
+            "A tarifa vive no banco; o recorte do cartao nao pode traze-la");
+        assertEquals(1, doCartao.size(),
+            "Uma compra foi feita neste cartao neste mes, e o filtro devolve uma: " + doCartao);
+    }
+
+    @Test
+    @Order(18)
+    @DisplayName("Filtrar pelo banco nao traz a compra feita no cartao daquele banco")
+    void filtroPeloBancoNaoAlcancaACompraDoCartao() {
+        // A metade que documenta o que confundiu o usuario: a compra foi lancada
+        // escolhendo ESTE banco no formulario, e mesmo assim o extrato do banco
+        // nao a mostra — ela mora na conta do cartao. O dinheiro so passa pelo
+        // banco no dia em que a fatura for paga.
+        var doBanco = listar("?mes=" + mesDaCompra + "&contaId=" + bancoDoCartaoId);
+
+        assertTrue(contem(doBanco, lancamentoNoBancoId),
+            "O que e do banco continua no banco");
+        assertTrue(contemNenhum(doBanco, compraNoCartaoId),
+            "Filtrar pelo banco nao traz o que foi no cartao — para isso existe"
+                + " o seletor de cartao");
+    }
+
+    @Test
+    @Order(19)
+    @DisplayName("Sem filtro de conta, o extrato do mes mostra os dois lado a lado")
+    void semFiltroOsDoisAparecem() {
+        var doMes = listar("?mes=" + mesDaCompra);
+
+        assertTrue(contem(doMes, compraNoCartaoId), "A compra do cartao esta no extrato do mes");
+        assertTrue(contem(doMes, lancamentoNoBancoId), "E a tarifa do banco tambem");
+    }
+
+    // =========================================================================
     // Ajudantes
     // =========================================================================
 
@@ -411,6 +548,26 @@ class LancamentoApiTest extends IntegracaoTest {
             new HttpEntity<>(cabecalhos(token)), Map.class);
         assertEquals(HttpStatus.OK, r.getStatusCode());
         return (List<Map<String, Object>>) r.getBody().get("lancamentos");
+    }
+
+    private static boolean contem(List<Map<String, Object>> lista, String id) {
+        return lista.stream().anyMatch(l -> id.equals(String.valueOf(l.get("id"))));
+    }
+
+    private static boolean contemNenhum(List<Map<String, Object>> lista, String id) {
+        return !contem(lista, id);
+    }
+
+    /** O contaId como esta GRAVADO na linha — a resposta mostra o banco (B-D61). */
+    private String contaIdGravadoDe(String lancamentoId) throws Exception {
+        try (java.sql.Connection c = conexaoOwner();
+             java.sql.Statement s = c.createStatement()) {
+
+            var rs = s.executeQuery(
+                "SELECT conta_id FROM lancamento WHERE id = '" + lancamentoId + "'");
+            assertTrue(rs.next(), "O lancamento deveria existir");
+            return rs.getString(1);
+        }
     }
 
     private Map<String, Object> buscar(String id) {

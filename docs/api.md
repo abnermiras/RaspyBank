@@ -17,14 +17,23 @@ Nenhum endpoint recebe `ambienteId` no corpo ou na query. O ambiente vem do toke
 
 **Uma exceção, explícita: `POST /api/convites/{id}/aceitar` recebe `ambienteId` no corpo** (B-D90, §2d). Não é furo na regra — é o próprio ponto do endpoint: só quem aceita pode escolher em qual dos ambientes dela a conta vai aparecer, e um valor padrão (o ambiente ativo) seria a escolha silenciosa que B-D90 recusou. Qualquer endpoint novo que "precise" de `ambienteId` no corpo tem que se justificar contra essa decisão, não citar este como precedente solto.
 
+**`GET /api/relatorios/extrato.xlsx` não recorta pelo ambiente ativo** (B-D117, §6c). Também não é furo — ele não recebe ambiente nenhum, do cliente. É que o arquivo não é uma tela: traz uma aba para cada ambiente da pessoa, e a separação das vidas acontece dentro dele.
+
 ### Dinheiro é string
 Valores monetários trafegam como **string** (`"450.00"`), nunca como número JSON. Número em JSON é `double` no JavaScript, e `double` para dinheiro é proibido por F1 — mandar número seria abrir na borda o buraco que o modelo fechou no banco. O cliente converte para decimal; o servidor lê como `BigDecimal`.
+
+A regra governa **JSON**. Dentro do `.xlsx` da §6c dinheiro é **número**, pelo mesmo motivo invertido: numa planilha feita para somar, string é o defeito (B-D118).
 
 ### Datas são datas
 `data_caixa` e `data_competencia` são `date` (B-D8), no formato `"2026-07-26"`, **sem hora e sem fuso**. Timestamp de auditoria (`criadoEm`) é ISO-8601 com offset — esse sim é instante.
 
 ### Erros
 Contrato único de B-T1: todo erro devolve `{"erro": "<frase exibível>"}`, e a validação acrescenta `{"campos": {"<campo>": "<mensagem>"}}`. Códigos: **400** validação, **401** sem sessão válida, **403** vínculo inexistente, **404** recurso inexistente, **409** conflito, **500** erro nosso sem detalhe.
+
+**Existem dois 401, com frases diferentes, e os dois são certos** (I-36, corrigido em 20/08/2026 — antes o segundo saía sem corpo nenhum, contra a própria promessa desta seção). Cada um é uniforme dentro do seu próprio conjunto, que é o que B-A8 exige — não é incoerência entre eles, é dois conjuntos diferentes de rota:
+
+- **`/api/auth/**` (`permitAll`, nunca passa pelo ponto de entrada abaixo)**: credencial errada, reuso de token de renovação detectado e sessão ausente respondem todos `{"erro":"Credenciais invalidas"}`, montado à mão em `naoAutorizado()` nos controladores de autenticação (B-T2/B-A8).
+- **Todo endpoint fora de `/api/auth/**`**: token ausente, malformado ou expirado respondem todos `{"erro":"Sessão expirada ou ausente. Entre novamente."}`, `Content-Type: application/json;charset=UTF-8`, uma única chave — `PontoDeEntradaSemSessao`, registrado na cadeia de segurança no lugar do `HttpStatusEntryPoint` padrão do Spring (que responde sem corpo). Os três casos são indistinguíveis de propósito: qualquer diferença viraria oráculo para quem sonda. Sem `WWW-Authenticate`, também de propósito — o cabeçalho abriria a caixa de usuário/senha do navegador por cima da tela.
 
 ### Nada é excluído fisicamente
 Categoria e subcategoria **arquivam** (B-D4); conta **encerra** (F7); lançamento é a única entidade com exclusão de verdade (F16), auditada. Por isso os verbos: `POST /{id}/arquivar` em vez de `DELETE`.
@@ -242,6 +251,10 @@ Duas ausências e dois nomes longos, todos deliberados:
 
 ### `GET /api/lancamentos?mes=2026-07`
 Filtro obrigatório por mês (sobre `dataCaixa`). Opcionais: `contaId`, `categoriaId`, `situacao`.
+
+`contaId` aceita também o **id de um cartão de crédito** (B-D115). Não é uma segunda semântica: o cartão **é** uma conta (B-D47, `cartao.conta_id` é PK e FK), então é a mesma igualdade sobre a mesma coluna. O `id` a passar é o que `GET /api/cartoes` devolve.
+
+A consequência precisa estar escrita, porque surpreende: uma **compra no cartão mora na conta do cartão**, não na do banco — o `POST` recebe o banco mais `cartaoEmitidoId`, e o servidor redireciona (B-D61). Logo, **filtrar por uma conta bancária não traz o que foi pago no cartão dela**, e isso é a igualdade funcionando, não omissão. Já filtrar pelo cartão devolve o que aquele cartão movimentou **no ambiente ativo** (B-D21) — as compras e a perna de entrada do pagamento da fatura (B-D59). Num cartão dividido isso é menos que o extrato do plástico, que mostra as compras de todos que têm acesso a ele (B-D110): o que a outra pessoa comprou foi lançado no ambiente dela. Quem precisa da soma que atravessa ambientes usa `GET /api/contas/{id}/extrato` (§2d, B-D87/B-D96).
 
 ```json
 {
@@ -954,6 +967,84 @@ E não é regra escrita: **cai da estrutura**. O cartão é uma conta própria (
 | `403` | Dividir a **conta** de um cartão (divida o plástico); repassar plástico recebido; emitir, alterar, encerrar o cartão; fechar, reabrir ou **pagar** a fatura de cartão recebido |
 | `404` | Cartão, plástico ou fatura fora do seu alcance (B-D25); revogar quem não usa o plástico |
 | `409` | Convite de plástico repetido; pessoa que já usa o plástico |
+
+---
+
+## 6c. Extrato completo em `.xlsx` (T-10) — 20/08/2026
+
+> O **único endpoint binário** do contrato, e a **única leitura que atravessa ambientes**. Decisões em `decisoes.md` §4s (B-D116 a B-D119); função `app_extrato_completo` na V22.
+
+### `GET /api/relatorios/extrato.xlsx?inicio=2026-01-01&fim=2026-12-31`
+
+Devolve a planilha, uma aba por ambiente do usuário, com todos os lançamentos cuja `data_caixa` cai na faixa — do mais recente para o mais antigo.
+
+| Parâmetro | Obrigatório | Formato | Ausente |
+|---|---|---|---|
+| `inicio` | não | `AAAA-MM-DD`, inclusive | `fim` **menos 12 meses** |
+| `fim` | não | `AAAA-MM-DD`, inclusive | **hoje** |
+
+Sem parâmetro nenhum, portanto, o padrão são **os últimos 12 meses** — mesmo espírito do `ano` ausente em §6. A tela manda as duas datas mesmo assim, porque precisa saber a faixa para descrever, enquanto gera, o que está gerando.
+
+**Sucesso — 200**, e o corpo **não é JSON**:
+
+```
+Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+Content-Disposition: attachment; filename="extrato-2026-01-01-a-2026-12-31.xlsx"
+```
+
+O nome traz a faixa porque é a única coisa que sobrevive ao download: três meses depois, na pasta de downloads, é ele que diz o que aquele arquivo cobre. É ASCII por construção (nasce de duas datas ISO), então sai só na forma simples `filename=`; o cliente lê também `filename*=UTF-8''…` e prefere essa quando as duas vierem, para o dia em que o nome ganhar acento.
+
+Os bytes são escritos **direto no fluxo da resposta**, sem `Content-Length` e sem arquivo em disco — o alvo é um Raspberry Pi, e materializar a planilha em memória é o que o desenho evita.
+
+### O teto de 12 meses, e por que ele é do contrato e não do gosto
+
+Faixa maior que 12 meses é **400**. O teto é o que sustenta a entrega ser síncrona (B-D116): ele limita o pior caso a milhares de linhas. São **12 meses de calendário**, não 365 dias — de `01/03/2023` a `29/02/2024` são 366 dias e **passa**, porque é o que a pessoa quis dizer; uma conta em dias recusaria essa faixa em ano bissexto e aceitaria a mesma faixa em ano comum. O teto é **inclusive**: 12 meses exatos passam, um dia a mais recusa.
+
+**A mensagem diz o limite**, e é esta, palavra por palavra — a tela repete a mesma frase na checagem local, para não existirem duas redações do mesmo erro:
+
+```json
+{
+  "erro": "O período não pode passar de 12 meses. Ajuste a data inicial ou a final e tente de novo.",
+  "campos": {
+    "inicio": "O período não pode passar de 12 meses. Ajuste a data inicial ou a final e tente de novo.",
+    "fim": "O período não pode passar de 12 meses. Ajuste a data inicial ou a final e tente de novo."
+  }
+}
+```
+
+O valor de cada campo é a frase **inteira**, e não um resumo: `lerErro` no cliente prefere a primeira mensagem de `campos` a `erro`, então um resumo apareceria na tela no lugar da frase boa.
+
+### A validação acontece antes do primeiro byte
+
+Não é detalhe de implementação, é contrato: **ou a resposta é 4xx com JSON, ou é 200 com a planilha inteira — nunca as duas coisas**. Depois que o primeiro byte sai, o status já foi para o fio e `400` deixa de ser possível; o cliente receberia um `200` com um `.xlsx` truncado e o navegador o salvaria como se fosse bom. Por isso as datas e a faixa são conferidas antes de qualquer cabeçalho de anexo.
+
+Se a geração falhar **depois** do primeiro byte (falha de banco no meio da escrita), a conexão cai sem terminar — o cliente vê erro de rede, não arquivo. E o `.xlsx` é um zip: truncado, nenhuma leitora o abre, então ninguém confere a vida financeira contra meio arquivo.
+
+### Este endpoint ignora o ambiente ativo — de propósito (B-D117)
+
+É a exceção a B-D111, e vai surpreender quem ler o contrato sem contexto: **toda** tela recorta pelo ambiente ativo do token, e este arquivo não recorta. Ele traz uma aba para **cada** ambiente em que o usuário tem vínculo, inclusive os compartilhados com ele.
+
+Não é furo em "o ambiente é implícito" (§1): a regra diz que quem escolhe o ambiente é o token e nunca o cliente, e continua valendo — não há parâmetro de ambiente aqui, nem no corpo nem na query. O que muda é que o arquivo não é uma tela: é o retrato da pessoa, e a separação das vidas se mantém **dentro** dele, uma aba por ambiente. Quem decide o que entra é `app_usuario_id()` na função da V22.
+
+### Dentro do arquivo, dinheiro é número (B-D118)
+
+Também exceção ao §1, e pelo mesmo tipo de motivo: "dinheiro é string" governa **JSON**, onde o risco é o `double` do JavaScript. Numa planilha feita para somar, string é o defeito — `SOMA()` sobre texto devolve zero. Então na planilha `Valor` é número, com **sinal** derivado do tipo (saída negativa), e `Data` é data de verdade, não texto.
+
+A linha de outra pessoa, em conta ou plástico dividido, **entra mascarada** (B-D89/B-D109): sem `Descrição`, `Categoria` e `Subcategoria`, e com a coluna `Quem` preenchida. A primeira aba do arquivo explica isso — sem ela, linha vazia parece arquivo quebrado.
+
+### Códigos de erro desta seção
+
+| Código | Quando | `erro` |
+|---|---|---|
+| `400` | `fim` anterior a `inicio` | `A data final não pode ser anterior à inicial.` |
+| `400` | faixa maior que 12 meses (B-D116) | `O período não pode passar de 12 meses. Ajuste a data inicial ou a final e tente de novo.` |
+| `400` | data em formato inválido (`?inicio=ontem`) | `Data inválida em "inicio". Use o formato AAAA-MM-DD, como 2026-01-31.` |
+| `401` | sem token, ou token expirado | `Sessão expirada ou ausente. Entre novamente.` — corpo é **JSON de erro**, nunca um `.xlsx` vazio (§1, I-36) |
+| `500` | falha nossa antes do primeiro byte | JSON de erro, sem detalhe |
+
+Os três **400** trazem `campos` com os parâmetros culpados (`inicio`, `fim`), cada um com a mesma frase de `erro`.
+
+**Não existe 403 aqui.** Não há o que autorizar: o endpoint não recebe id nenhum, e o que a pessoa não pode ver a política do banco já não devolve.
 
 ---
 

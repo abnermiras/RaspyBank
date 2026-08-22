@@ -60,6 +60,24 @@ public class TratadorGlobalDeErros {
             "campos", campos));
     }
 
+    /**
+     * Parametro de query invalido — <b>400</b>, e nao 500.
+     *
+     * <p>O corpo anotado tem {@code MethodArgumentNotValidException}; a query
+     * nao tinha nada, e caia na captura geral como erro interno. Erro de quem
+     * pediu respondido como erro nosso e o defeito da familia do I-12: alem de
+     * mentir sobre a culpa, esconde da pessoa o que ela precisa corrigir.</p>
+     *
+     * <p>{@code erro} e {@code campos} carregam a <b>mesma</b> frase de
+     * proposito — ver {@link EntradaInvalida}.</p>
+     */
+    @ExceptionHandler(EntradaInvalida.class)
+    public ResponseEntity<Map<String, Object>> entradaInvalida(EntradaInvalida e) {
+        return ResponseEntity.badRequest().body(Map.of(
+            "erro",   e.getMessage(),
+            "campos", e.getCampos()));
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, String>> corpoIlegivel(HttpMessageNotReadableException e) {
         return ResponseEntity.badRequest().body(Map.of(

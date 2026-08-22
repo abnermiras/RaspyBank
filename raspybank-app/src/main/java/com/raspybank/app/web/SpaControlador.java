@@ -36,6 +36,7 @@ public class SpaControlador {
         "/categorias",
         "/contas",
         "/cartoes",
+        "/relatorios",
         "/perfil"
     })
     public String telas() {

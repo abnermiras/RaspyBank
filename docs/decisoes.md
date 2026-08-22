@@ -557,6 +557,89 @@ Verificada por `SituacaoDeCompraNoCartaoTest` (6 casos), que falha em 3 deles co
 |---|---|---|
 | B-D114 | **Nenhum campo de data da tela é preenchido com `toISOString()`.** O helper é `hojeISO()`, que usa os getters locais | `toISOString()` devolve UTC, e das 21h em diante em São Paulo ele abre o campo com **amanhã**. Um pagamento feito às 22h nascia com `data_caixa` do dia seguinte e, por B-D9, `PREVISTO` — a fatura ficava quitada com o próprio pagamento previsto. É a mesma armadilha que B-D8 já tinha resolvido no banco (`date` em vez de instante), escapada na tela. Achada como I-28, no formulário de pagamento da T-06, que era a **única** ocorrência no frontend |
 
+# 4r. O filtro de conta da T-08 ganha par: o cartão (19/08/2026) — B-D115
+
+Origem: relato do Abner de que o filtro de conta "não funciona" para a Luciana — o dropdown abre com as contas dela, escolher qualquer uma deixa o grid em branco, e voltar para "todas as contas" traz tudo de volta. No usuário dele o mesmo filtro funcionava.
+
+Não havia defeito. Ele só tem gasto em conta, ela só tem gasto em cartão — a diferença entre os dois usuários era coincidência de dados, não bug. O que existe é uma **lacuna**: uma compra no cartão é inalcançável pelo filtro de conta, porque o seletor vem de `ContaRepositorio.bancariasDoAmbiente`, que **exclui** conta de cartão de propósito (B-D62), enquanto a compra grava `lancamento.contaId` = a conta do cartão (`LancamentoServico.resolverContaDaCompra`), e o filtro é igualdade crua (`l.contaId = :contaId`). O seletor nunca oferece o valor que faria a compra aparecer.
+
+Decisão dele: a T-08 ganha um seletor de **cartão** ao lado do de conta, filtrando pelos cartões utilizados — próprios e compartilhados.
+
+| # | Decisão | Motivo resumido |
+|---|---|---|
+| B-D115 | **O filtro de cartão da T-08 escreve no mesmo `contaId`** que o filtro de conta — não é parâmetro novo da API. Funciona porque `cartao.id` **já é** o `contaId` do cartão, por construção (F5/B-D47). Os dois seletores são mutuamente exclusivos por construção: um estado só, `filtros.contaId`, que torna irrepresentável o par "conta X E cartão Y" — que devolveria vazio sempre | Um segundo caminho para a mesma consulta (um parâmetro `cartaoId` à parte) seria uma segunda fonte da verdade para a mesma pergunta, e a segunda é sempre a que envelhece. Custo aceito: o contrato passa a dizer explicitamente que `contaId` também aceita o id de um cartão. **B-D62 não é revogada nem enfraquecida** — vale onde foi decidida, a tela de contas; aqui o cartão é a única forma de alcançar as compras, e aparece em seletor próprio, sem virar "mais uma conta" na lista |
+
+**Por que não filtrar por `cartaoEmitidoId` (o plástico).** As duas pernas do pagamento da fatura não têm plástico e moram na mesma conta do cartão (B-D59); filtrar pelo plástico esconderia o pagamento do extrato do cartão. Filtrar pela conta do cartão devolve o pagamento junto — mas só o que o ambiente ativo movimentou (B-D21), não o extrato inteiro do plástico num cartão dividido (B-D110). Plástico é assunto da tela de cartões, não deste filtro.
+
+Não há migração: nenhuma mudança de schema, só o seletor novo e o contrato explicitando o que `contaId` já aceitava na prática.
+
+# 4s. Extrato completo em `.xlsx` — T-10 (20/08/2026) — B-D116 a B-D119
+
+Origem: o RaspyBank não tinha como tirar os dados de dentro dele — toda leitura é tela, recortada por mês e por ambiente ativo, e nenhum endpoint devolvia arquivo. O desenho anterior (`docs/desenho-t10-relatorios.md`, commit 64fe6e1, 19/08/2026) propunha fila assíncrona: tabela de estado, executor, propagação de identidade entre threads, volume em disco, endpoint binário e polling. A investigação de 20/08/2026 respondeu à pergunta que travava a decisão — *"o relatório demora a ponto de justificar isso?"* — com **não**, e a fila foi recusada.
+
+| # | Decisão | Motivo resumido |
+|---|---|---|
+| B-D116 | **O relatório é síncrono, com teto de 12 meses por pedido.** | A fila foi desenhada e **recusada**: o sistema não tem uma linha de assincronismo, e executor + tabela de estado + propagação de identidade entre threads + volume + polling não se pagam para um arquivo de segundos. O teto de 12 meses é o que sustenta a decisão — limita o pior caso a milhares de linhas, não milhões. A evidência não foi estimativa: o Mapa de Gastos já faz a metade cara (`SituacaoServico.sincronizar` + varredura do ano inteiro) a cada abertura. Crescer para fila depois é **aditivo**: o montador não muda, só o transporte. A propagação de identidade em thread de fundo, que B-D43 deixou em aberto, continua adiada — virá com o relay do outbox (I-30), não com o relatório |
+| B-D117 | **O relatório atravessa ambientes de propósito, e é a única leitura que o faz.** | B-D111 (o escopo segue o ambiente ativo) continua valendo para toda tela; o arquivo é o oposto por natureza — é o retrato da pessoa, não da tela aberta. Uma aba por ambiente mantém a separação de vidas *dentro* do arquivo. Nenhum privilégio novo foi preciso: `pol_lancamento_ambiente` já usa `app_ambientes_do_usuario()`, e o recorte por ambiente ativo sempre foi Java (B-D21), não isolamento |
+| B-D118 | **No `.xlsx`, dinheiro é número e data é data**, não string. | A convenção "dinheiro é string" governa JSON, onde o risco é `double`; numa planilha feita para somar, string é o defeito. `Valor` é **uma** coluna, com o sinal derivado do `tipo`: o banco guarda positivo, mas uma coluna de positivos soma para um número sem significado, e duas colunas de dinheiro convidam a somar a errada |
+| B-D119 | **A aba é a T-08 desempacotada.** | Mesmas colunas da tela de lançamentos (`Data · Descrição · Situação · Categoria · Subcategoria · Conta · Pago com · Parcela · Tipo · Valor · Quem`), com as três células que empacotam mais de um fato — `previsto` dentro de Descrição, `3/12` dentro de Pago com, `+`/`−` dentro de Valor — abertas em colunas próprias. É a mesma regra que separa categoria de subcategoria, aplicada até o fim: numa planilha feita para filtrar, célula que carrega dois fatos é defeito. Mais `Quem`, que a tela não tem e a **máscara exige** — sem ela, a linha alheia (Descrição e Categoria vazias) parece dado corrompido. Ordem `data_caixa DESC, criado_em DESC`; o segundo critério não é enfeite, sem ele duas gerações idênticas produzem arquivos diferentes |
+
+## O que sobreviveu do desenho, e o que não sobreviveu
+
+Sobrevivem inteiros: uma aba por ambiente, a máscara da linha alheia (B-D89/B-D109), dinheiro como número na planilha, e a leitura por `SECURITY DEFINER`. Não sobrevivem: o módulo `raspybank-relatorio` (montador e escritor ficam em `raspybank-app` — sem fila não há ciclo de vida a modelar, e um módulo só com um escritor seria camada técnica, que a arquitetura por contexto de negócio proíbe), a tabela `relatorio`, o volume no Pi, os quatro endpoints (viraram um: `GET /api/relatorios/extrato.xlsx`) e o polling de 3s (virou estado de carregamento honesto — cronômetro correndo, botão desabilitado, "demorando" distinto de "falhou"). Ficou **fora do escopo**, decidido e não em aberto: CSV, coluna de saldo corrente, entrega pelo Telegram.
+
+## A V22 cede o número que era da V21
+
+A migração nasceu `V21__extrato_completo.sql`, seguindo a numeração do desenho. Houve colisão: `V21__telegram_e_um_destino_so.sql` já existe em `origin`, na branch `telegram/desenho-e-fatia-1`. Decisão do Abner em 20/08/2026: o relatório cede o número, e a migração foi renomeada para **V22**.
+
+**Consequência para quem for mergear o Telegram depois:** o Flyway grava o checksum de cada versão aplicada e recusa uma versão menor chegando depois de uma maior já aplicada. Com a V22 aplicada neste banco, a `V21__telegram_e_um_destino_so.sql` não pode entrar como V21 — ela precisará ser renumerada para **V23** no merge. Isto não é automático e não há teste que avise sozinho: quem mergear precisa lembrar.
+
+**Há um terceiro pretendente ao número V21**, sem relação com o Telegram: `docs/inconsistencias.md` (I-24, "O que ficou pendente") registra o gatilho que falta para o invariante de `grupo_parcelamento_id` valer também no banco. Três migrações diferentes já disputaram o nome "V21" nesta história — a do Telegram, a do extrato (renumerada para V22) e essa. Quem for escrever a migração do I-24 confere `§6` (Estado das migrações) para o número livre no momento, não este trecho.
+
+## Os três achados que não chegaram a produção
+
+Registrados em detalhe, no formato de defeito real, em `docs/inconsistencias.md` — os três encontrados e corrigidos antes de qualquer relato de uso, dois deles pelo `qa-adversarial`:
+
+- **I-34** (revisão do plano, não teste): o plano mandava derivar a aba da linha alheia só de `conta_ambiente`, preferindo `origem = true`. Como aceitar um plástico vincula a **conta do contrato inteiro** ao ambiente de quem recebeu (V19), essa derivação vazaria, no arquivo dela, as compras de **todos** os plásticos daquele cartão — mascaradas, mas com valor, data e quem. É exatamente o que B-D106 tirou da tela e o que B-D110 recusa. A V22 aplicada corrige isso reproduzindo a regra da V20: `origem` OU conta que não é cartão OU plástico liberado para aquele ambiente.
+- **I-35**: dois ambientes com o mesmo nome podiam produzir duas abas de mesmo nome no `.xlsx`, e o formato descarta ou recusa a pasta inteira — um ambiente sumindo do extrato sem aviso. A causa era desempatar sobre um texto diferente do que o `fastexcel` realmente grava; a regra do que pode virar nome de aba passou a morar em `EscritorXlsx`, que agora recusa antes do primeiro byte.
+- **I-36**: o 401 de sessão ausente saía com corpo vazio em **todo** endpoint protegido, desde a Fase 4 — não é defeito da T-10, é do sistema inteiro, só exposto porque a §6c passou a prometer corpo explicitamente. `PontoDeEntradaSemSessao` substitui o `HttpStatusEntryPoint` padrão do Spring. Contrato atualizado em `docs/api.md` §1.
+
+## O que a implementação acrescentou
+
+**a) A aba de capa, "Sobre este arquivo".** Três avisos, sem enfeite: a faixa pedida e quando foi gerado; por que existem linhas com Descrição e Categoria vazias (a coluna `Quem` diz de quem); e que o total não bate com o Mapa de Gastos, porque transferência, ajuste e previsto entram no arquivo — o caminho para reproduzir o número do Mapa é filtrar fora `Transferência`, `Ajuste` e `PREVISTO` pelas colunas `Categoria` e `Situação` (a sinalização que o I-31 já apontava como faltante).
+
+**b) `AutoFilter` na linha 1 e painel congelado.** Custa uma chamada no `fastexcel` e é o uso declarado do arquivo — uma planilha para filtrar que abre sem filtro seria a mesma célula empacotada de novo, só que na ferramenta em vez do dado.
+
+**c) O download passou pelo `cliente.js` existente, sem função paralela.** `pedir` ganhou a opção `comoArquivo`: quando a resposta é `ok`, devolve `{ ok, status, blob, nomeArquivo }`; quando não é, continua lendo como texto/JSON, para `lerErro` seguir funcionando. `pedirComRenovacao` só lê `.status` e `.corpo?.motivo`, então vale sem alteração — o download herda de graça a renovação de token e o tratamento do 403 de B-D83. Uma função paralela teria perdido os dois.
+
+**d) O estado de carregamento é a peça que substitui a fila, não um detalhe de tela.** Ela guarda `{ inicio, fim }` da faixa em geração (não um booleano — se a pessoa mexer nos campos enquanto o arquivo vem, a frase continua descrevendo o pedido no ar), cronometra os segundos, e a partir de 15s passa a dizer que demorar é normal, sem trocar de estado para "falhou". É a resposta concreta à pergunta que motivou toda a recusa da fila: *"o usuário não sabe se travou"*.
+
+**e) As frases de erro do teto de 12 meses são cópia literal do servidor**, duplicadas de propósito na tela para a recusa ser imediata: pedir ao servidor para saber o que dizer seria a mesma ida e volta que a validação local existe para evitar, e duas redações do mesmo erro fariam a pessoa achar que são dois problemas.
+
+## O parecer de fronteiras (commit `08d7226`, 20/08/2026)
+
+**Limpo, sem bloqueante.** O `revisor-de-fronteiras` confirmou três garantias que valem
+registrar como confirmadas, não como pendência: o recorte por plástico da V22 não tem caminho
+de fuga — `cartao.conta_id` é `PRIMARY KEY` (`V12:100`), então `ct.conta_id IS NULL` só é
+verdadeiro para conta que **não** é cartão; `ux_ca_uma_origem` (`V16:75`) garante uma origem
+por conta; e o `CROSS JOIN LATERAL` **corta em vez de deixar passar** quando nenhum vínculo
+sobrevive ao recorte — o modo de falha é "some", não "vaza". A máscara está completa:
+`lancamento` tem exatamente duas colunas de texto livre, `descricao` (mascarada) e
+`observacao` (que não sai da função). E B-D117 está contido: `app_extrato_completo` tem um
+único chamador em todo o código de produção.
+
+Quatro dívidas ficaram registradas, em `docs/inconsistencias.md`, no formato leve de achado
+em aberto (nenhuma é defeito ativo, nenhuma bloqueou a entrega): **I-37** (o rótulo de
+apresentação da forma de pagamento mora em `FormaPagamentoControlador`, e o montador do
+extrato importa `..web..` para chamá-lo — camada ao contrário, sem decisão que a proíba);
+**I-38** (a conexão fica presa durante a transmissão do `.xlsx`, com dois efeitos ainda não
+escritos: pressão sobre o autovacuum se o teto de 12 meses subir, e um `.xlsx` truncado se
+`idle_in_transaction_session_timeout` for configurado); **I-39** (o 401 JSON de
+`PontoDeEntradaSemSessao`, do I-36, alcança toda a cadeia de segurança e não só `/api/**` —
+consequência do I-36 que ninguém tinha escrito); **I-40** (`MigracoesTest` confere os nomes
+das funções `SECURITY DEFINER` mas não o `search_path` delas — a mais valiosa das quatro, e
+pré-existente à T-10).
+
 # 5. Revisões registradas (R1–R6, sessão de requisitos)
 
 Decisões que substituíram decisões anteriores durante o próprio processo. O motivo da mudança é tão importante quanto a decisão final.
@@ -611,4 +694,7 @@ Decisões que substituíram decisões anteriores durante o próprio processo. O 
 | V17 | **Cartão compartilhado** (§4l, B-D98 a B-D103): `app_total_da_fatura` e `app_extrato_da_fatura`; políticas de `cartao`, `cartao_emitido` e `fatura` divididas por verbo, com **fechar dos dois e reabrir do dono** separados pelo valor de `fechada_em` na linha nova (B-D100). Nenhuma tabela nova — compartilhar cartão é compartilhar a conta do contrato (B-D98). Verificada por `CartaoCompartilhadoApiTest` (8) | ✔ |
 | V20 | **Escopo por ambiente e o banco com nome** (§4o, B-D111/B-D112): `app_nome_do_banco_do_cartao`; `app_extrato_da_fatura` ganha o ambiente por parâmetro e recorta por ele. Os plásticos e os números da fatura passam a seguir o ambiente ativo. Verificada por `CartaoCompartilhadoApiTest` (14) | ✔ |
 | V19 | **O PLASTICO como unidade** (§4n, B-D106 a B-D110): `cartao_emitido_ambiente`; `conta_convite.cartao_emitido_id`; `app_emitidos_liberados`, aceite, revogação e lista do plástico; `app_total_do_plastico`; `pol_cartao_emitido_leitura` com as duas origens de visibilidade; `app_extrato_da_fatura` recortando por plástico; `pol_fatura_fechar` removida (B-D108). Revoga B-D98/B-D99/B-D100 da V17. Verificada por `CartaoCompartilhadoApiTest` (12), reescrito | ✔ |
+| V22 | **O extrato completo** (§4s, B-D116 a B-D119): `app_extrato_completo(inicio, fim)`, a quarta da família de `app_extrato_da_conta` e a única **sem porteiro** — os parâmetros são datas e não carregam autorização. Devolve todos os lançamentos do período em todos os ambientes do usuário, com a máscara de B-D89 sobre descrição, categoria e subcategoria, e com o recorte por plástico herdado da V20. **Nenhuma tabela nova**: a entrega é síncrona (B-D116), então não há pedido, estado nem expiração a guardar. Nenhum índice novo — as duas pernas caem em `ix_lancamento_ambiente_caixa` e `ix_lancamento_conta_caixa`, ambos da V10 | ✔ |
 | V18 | **Telegram no cadastro** (B-D105): `auth_cadastrar_usuario` ganha o quarto parâmetro `telegram_id`, com `DROP` + `CREATE` para não deixar duas portas de cadastro. A coluna e o índice parcial existem desde a V1. Verificada por `AutenticacaoFluxoTest` | ✔ |
+
+**Por que não há V21 nesta tabela.** O extrato completo (V22) nasceu `V21`, seguindo o desenho. Houve colisão com `V21__telegram_e_um_destino_so.sql`, já existente em `origin` na branch `telegram/desenho-e-fatia-1` — decisão registrada em §4s. O Abner decidiu que o relatório cede o número; a migração foi renomeada para V22. **Consequência para o merge do Telegram**: o Flyway não aceita uma V21 chegando depois de uma V22 já aplicada — a migração do Telegram terá de virar **V23**, e isso não é automático.
