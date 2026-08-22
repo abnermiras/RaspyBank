@@ -252,12 +252,12 @@ junto da correção de código, porque migração de schema é classe de risco d
 a aplica no deploy, e uma que falhe no meio impede o app de subir.
 
 **Nota de 18/08/2026:** esta pendência foi escrita chamando a migração futura de "V21", e o
-número foi ocupado pela correção do I-31/I-32, sem relação com este item.
+número foi ocupado pela correção do I-41/I-42, sem relação com este item.
 
 **Nota de 22/08/2026:** o "V21" acabou sendo disputado por **três** coisas — esta pendência, a
-correção do I-31/I-32, e o extrato completo da T-10. As duas últimas foram numeradas em
+correção do I-41/I-42, e o extrato completo da T-10. As duas últimas foram numeradas em
 branches paralelas, cada uma olhando só a sua, e nenhuma viu a outra. A T-10 ficou com a **V22**
-(está na `main`) e a correção do I-31/I-32 virou **V23**. Esta pendência continua sem número, e
+(está na `main`) e a correção do I-41/I-42 virou **V23**. Esta pendência continua sem número, e
 agora com o motivo escrito: **número de migração não se reserva olhando a própria branch.** Antes
 de escolher, `git ls-tree` nas outras — o Flyway não aceita versão menor chegando depois da
 maior, e depois que qualquer uma roda no Pi, renumerar deixa de ser renomear arquivo.
@@ -569,7 +569,7 @@ atual depende do relay, então nada bloqueia por causa deste item.
 
 Origem: `qa-adversarial` testando o `PUT /api/perfil/telegram` (B-D120) antes do `revisor-de-fronteiras`. Os dois primeiros são defeitos de verdade, consertados por `banco-e-migracoes` na V23. O terceiro é um grupo de achados menores, deliberadamente não consertados — proporção, não esquecimento.
 
-## I-31 — Três grafias do mesmo Telegram passavam por três contas diferentes — **RESOLVIDO em 18/08/2026, na V23**
+## I-41 — Três grafias do mesmo Telegram passavam por três contas diferentes — **RESOLVIDO em 18/08/2026, na V23**
 
 ### O sintoma
 
@@ -597,9 +597,9 @@ O caso em si, nada — diferente do I-24, este não chegou à produção: o `qa-
 
 ### A lição
 
-Campo novo com validação frouxa e índice único não herda de graça o cuidado que o campo irmão já tinha. `email` e `telegram_id` colidem pela mesma pergunta — "isto já existe, escrito de outro jeito?" — e só um dos dois tinha a resposta certa. Vale conferir os outros campos com índice único e validação flexível antes que um deles vire outro I-31.
+Campo novo com validação frouxa e índice único não herda de graça o cuidado que o campo irmão já tinha. `email` e `telegram_id` colidem pela mesma pergunta — "isto já existe, escrito de outro jeito?" — e só um dos dois tinha a resposta certa. Vale conferir os outros campos com índice único e validação flexível antes que um deles vire outro I-41.
 
-## I-32 — A regra "vazio vira NULL" só existia em Java, em duas cópias — **RESOLVIDO em 18/08/2026, na V23**
+## I-42 — A regra "vazio vira NULL" só existia em Java, em duas cópias — **RESOLVIDO em 18/08/2026, na V23**
 
 ### O sintoma
 
@@ -625,7 +625,7 @@ Nada — o `CHECK` fecha a classe inteira do defeito, não só o caminho testado
 
 Regra de negócio que existe só em código de aplicação não é garantia, é convenção que dois autores diferentes têm que lembrar de repetir igual. O padrão do projeto (P3, migração antes de código; RLS no banco, nunca em `where` de Java) já dizia isto para outras superfícies; aqui a coluna tinha o índice mas não o `CHECK`, e a lacuna não apareceu até o `qa-adversarial` escrever um `UPDATE` direto.
 
-## I-33 — Três achados menores no contrato de `PUT /api/perfil/telegram` *(aberta — proporção, não esquecimento)*
+## I-43 — Três achados menores no contrato de `PUT /api/perfil/telegram` *(aberta — proporção, não esquecimento)*
 
 ### Os três achados
 
