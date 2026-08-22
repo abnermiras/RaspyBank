@@ -14,9 +14,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -112,13 +115,99 @@ class AutenticacaoFluxoTest extends IntegracaoTest {
             "A frase nao explica o que houve: " + segundo.getBody().get("erro"));
     }
 
+    // -------------------------------------------------------------------------
+    // O 401 de quem chegou sem sessao (I-36)
+    //
+    // Estes dois testes moram AQUI, e nao no teste do endpoint que revelou o
+    // defeito, porque o contrato e do SISTEMA: o ponto de entrada de seguranca
+    // e unico e responde por todo endpoint protegido. O I-36 nasceu na T-10
+    // (extrato .xlsx) e por um tempo a unica prova do corpo do 401 morava em
+    // ExtratoCompletoFaixaTest — quem apagasse a T-10 levaria junto a prova de
+    // um contrato que nao e dela, sem ninguem notar. La ficou so o modo de
+    // falha proprio do endpoint binario (o 401 nao pode sair como bytes de
+    // planilha); a forma do corpo se cobra neste arquivo, que e onde um leitor
+    // procura por "401".
+    // -------------------------------------------------------------------------
+
+    /**
+     * O corpo do 401, byte a byte, como {@code PontoDeEntradaSemSessao} o
+     * escreve e como {@code docs/api.md} §1 (B-T1) o promete.
+     *
+     * <p>Repetido aqui de proposito, em vez de importado da producao: se a
+     * frase mudar de um lado so, este teste cai — que e exatamente o pedido,
+     * porque mudar a frase e mudar o contrato publicado.</p>
+     */
+    private static final String CORPO_DO_401 =
+        "{\"erro\":\"Sessão expirada ou ausente. Entre novamente.\"}";
+
     @Test
     @Order(2)
-    @DisplayName("Sem token, endpoint protegido responde 401")
+    @DisplayName("Sem token, endpoint protegido responde 401 com {\"erro\": frase} — e nada mais (I-36)")
     void semTokenRespondeNaoAutorizado() {
-        ResponseEntity<String> resposta =
-            http.getForEntity("/api/perfil", String.class);
+        ResponseEntity<byte[]> resposta = http.exchange("/api/perfil", HttpMethod.GET,
+            new HttpEntity<>(new HttpHeaders()), byte[].class);
+
         assertEquals(HttpStatus.UNAUTHORIZED, resposta.getStatusCode());
+        assertCorpoDo401(resposta);
+    }
+
+    @Test
+    @Order(2)
+    @DisplayName("Token malformado responde o MESMO 401, byte a byte, que a ausencia de token")
+    void tokenMalformadoRespondeOMesmo401() {
+        HttpHeaders cabecalhos = new HttpHeaders();
+        cabecalhos.setBearerAuth("nao.e.um.token");
+
+        ResponseEntity<byte[]> resposta = http.exchange("/api/perfil", HttpMethod.GET,
+            new HttpEntity<>(cabecalhos), byte[].class);
+
+        assertEquals(HttpStatus.UNAUTHORIZED, resposta.getStatusCode());
+        // Distinguir "malformado" de "ausente" so ajuda quem esta sondando —
+        // e a mesma regra de B-A8, que ja obriga os 401 do login a serem
+        // indistinguiveis entre si.
+        assertCorpoDo401(resposta);
+    }
+
+    /**
+     * Confere o 401 em bytes, nao em {@code String.contains}.
+     *
+     * <p>Tres coisas separadas, porque falham por motivos diferentes: o corpo
+     * existe (era o I-36 — zero bytes), o {@code Content-Type} declara JSON em
+     * UTF-8 (sem isso o acento de "Sessão" chega quebrado na tela), e o JSON
+     * tem <b>uma unica chave</b>. A comparacao byte a byte e o que pega o
+     * acento gravado em Latin-1 ou duplo-codificado: uma assercao que so olhe
+     * para a chave {@code erro} passa feliz com {@code SessÃ£o}.</p>
+     */
+    private static void assertCorpoDo401(ResponseEntity<byte[]> resposta) {
+        byte[] corpo = resposta.getBody() == null ? new byte[0] : resposta.getBody();
+
+        assertTrue(corpo.length > 0,
+            "O 401 veio com corpo VAZIO. Era o I-36: B-T1 promete {\"erro\": ...} para"
+                + " TODO erro, e corpo vazio nao da a quem chamou frase nenhuma para mostrar");
+
+        MediaType tipo = resposta.getHeaders().getContentType();
+        assertNotNull(tipo, "O 401 saiu sem Content-Type: o cliente adivinha como ler");
+        assertTrue(MediaType.APPLICATION_JSON.isCompatibleWith(tipo),
+            "O 401 nao se declara JSON: " + tipo);
+        assertEquals(StandardCharsets.UTF_8, tipo.getCharset(),
+            "O 401 nao declara UTF-8 (" + tipo + "): o acento de \"Sessão\" chega quebrado");
+
+        assertArrayEquals(CORPO_DO_401.getBytes(StandardCharsets.UTF_8), corpo,
+            "O corpo do 401 nao e o publicado. Veio <"
+                + new String(corpo, StandardCharsets.UTF_8) + ">");
+
+        Map<String, Object> json;
+        try {
+            json = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(corpo, Map.class);
+        } catch (Exception e) {
+            throw new AssertionError("O corpo do 401 nao e JSON: "
+                + new String(corpo, StandardCharsets.UTF_8), e);
+        }
+        assertEquals(Set.of("erro"), json.keySet(),
+            "O 401 traz chave alem de \"erro\". B-T1 so acrescenta \"campos\" em"
+                + " validacao, e stacktrace ou caminho vazando aqui e informacao"
+                + " de graca para quem sonda: " + json.keySet());
     }
 
     @Test

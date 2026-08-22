@@ -147,13 +147,42 @@ export default function Lancamentos() {
       </header>
 
       <div className="filtros">
+        {/* Dois seletores, UM campo só: `filtros.contaId` (B-D115).
+            Compra no cartão mora na conta do CARTÃO, e essa conta não aparece em
+            "Todas as contas" — B-D62 a tira de lá de propósito, porque tratar o
+            cartão como banco confunde. Lá a regra está certa; aqui ela deixava as
+            compras inalcançáveis pelo filtro, e o cartão é a única forma de
+            chegar nelas. Como `cartao.id` JÁ é o contaId do cartão (F5/B-D47),
+            este seletor escreve no mesmo campo do outro: cada um só exibe o valor
+            quando ele é da sua própria lista, então escolher num devolve o outro
+            ao neutro. "Conta X E cartão Y" não é estado possível — e é bom que
+            não seja, porque devolveria vazio sempre. */}
         <select
-          value={filtros.contaId}
+          value={apoio.contas.some((c) => c.id === filtros.contaId) ? filtros.contaId : ''}
           onChange={(e) => setFiltros({ ...filtros, contaId: e.target.value })}
         >
           <option value="">Todas as contas</option>
           {apoio.contas.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
         </select>
+
+        {/* Sem cartão nenhum o seletor some em vez de ficar desabilitado: ele
+            teria só a opção neutra, e perguntar "qual cartão?" a quem não tem
+            nenhum é ruído — desabilitado ocuparia a linha com a mesma pergunta
+            vazia. O nome traz o dono quando o cartão veio dividido (B-D112),
+            pela mesma razão de bancosEmprestados: você pode ter um homônimo. */}
+        {apoio.cartoes.length > 0 && (
+          <select
+            value={apoio.cartoes.some((c) => c.id === filtros.contaId) ? filtros.contaId : ''}
+            onChange={(e) => setFiltros({ ...filtros, contaId: e.target.value })}
+          >
+            <option value="">Todos os cartões</option>
+            {apoio.cartoes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.recebidoDe ? `${c.nome} de ${c.recebidoDe}` : c.nome}
+              </option>
+            ))}
+          </select>
+        )}
 
         <select
           value={filtros.categoriaId}

@@ -80,6 +80,7 @@ O formulário tem **cinco campos e mais nada**:
 - **Sem campo de ambiente** (B-D2): vem do ambiente ativo no topo, mesmo em conta compartilhada.
 - **Sem campo de status** (B-D9 / R9): data no passado ou hoje → `REALIZADO`; no futuro → `PREVISTO`. A lista mostra o status resultante e permite corrigir depois; o formulário não pergunta.
 - A lista de categorias exclui as arquivadas (B-D4) e inclui as sistêmicas que fazem sentido lançar à mão.
+- **Filtro: quatro seletores — conta, cartão, categoria, situação** (B-D115, 19/08/2026). Compra no cartão grava `contaId` = a conta do cartão (B-D61), e o seletor de conta lista só contas bancárias (B-D62) — sem o de cartão, quem gasta no cartão filtra por qualquer conta e vê a tela vazia, que foi exatamente o relato que originou a decisão. Os dois seletores escrevem no **mesmo** `filtros.contaId`: cada um só exibe o valor quando ele pertence à própria lista de opções, o que torna "conta X e cartão Y" um estado irrepresentável, não um estado proibido. Cartão compartilhado entra na lista com o dono no rótulo ("Black de Abner"), mesmo motivo de B-D112 — pode haver homônimo próprio. Sem cartão no ambiente, o seletor **some**, em vez de ficar desabilitado: com só a opção neutra ele não responde pergunta nenhuma.
 - **API: não existe — depende da V10.**
 
 ---
@@ -246,7 +247,7 @@ As quatro telas do mínimo aceitável existem. O que cada uma **recusou** fazer 
 
 **T-05 — Contas.** O `saldoComPrevistos` só aparece **quando difere** do `saldo`; repetido, o número viraria ruído. O formulário diz em texto que o saldo inicial vira um lançamento em `Ajuste`, em vez de fingir um campo mágico — o saldo continua sendo só a soma dos lançamentos.
 
-**T-08 — Lançamentos.** A tela **não reimplementa** as duas derivações. A situação é *mostrada* enquanto a pessoa escolhe a data ("nasce como previsto"), mas o campo só é enviado na edição, onde corrigir é legítimo. O campo `tipo` só aparece quando a categoria é `AMBOS` — o único caso em que o servidor não decide sozinho. Duplicar essas regras criaria uma segunda fonte da verdade, e a segunda é sempre a que envelhece.
+**T-08 — Lançamentos.** A tela **não reimplementa** as duas derivações. A situação é *mostrada* enquanto a pessoa escolhe a data ("nasce como previsto"), mas o campo só é enviado na edição, onde corrigir é legítimo. O campo `tipo` só aparece quando a categoria é `AMBOS` — o único caso em que o servidor não decide sozinho. Duplicar essas regras criaria uma segunda fonte da verdade, e a segunda é sempre a que envelhece. O filtro de cartão que a B-D115 acrescentou recusou o mesmo tipo de atalho: em vez de um `cartaoId` novo na API, ele escreve no `contaId` que já existia — o mesmo raciocínio, aplicado ao filtro em vez do formulário.
 
 **T-07 — Mapa de gastos.** Três blocos, doze colunas sempre, e o previsto numa segunda linha da célula, menor e noutra cor. A tela **nunca soma** realizado com previsto: é o B-D10 desenhado. As células são reordenadas por mês na chegada — o contrato promete doze, não promete ordem, e tabela de doze colunas montada fora de ordem erra em silêncio.
 
@@ -603,6 +604,31 @@ No formulário de lançamento dela aparece **"Nubank de Abner"**, junto das cont
 O rótulo traz o dono porque ela pode ter um Nubank também.
 
 Antes disso o cartão dividido aparecia embaixo de **todas** as contas dela, o que era incoerente — escolher "C6 dela" e ver "UltraVioleta de Abner" não quer dizer nada. Foi ele quem apontou.
+
+## 19. T-10 — Relatórios (20/08/2026, V22)
+
+Tela nova, fora do roteiro original de telas do mínimo aceitável. Decisões em `decisoes.md` §4s (B-D116 a B-D119); contrato em `api.md` §6c; função em `security-definer.md`, seção "Funções da V22".
+
+### O que ela consome
+
+Um endpoint só, e o primeiro binário do projeto: `GET /api/relatorios/extrato.xlsx?inicio=&fim=`. A tela manda sempre as duas datas — mesmo quando ausentes na API elas caem no padrão dos últimos 12 meses — porque precisa saber a faixa para descrever, enquanto gera, o que está sendo gerado. O download passa por `pedir(..., { comoArquivo: true })`: quando a resposta é `ok`, `cliente.js` devolve `{ blob, nomeArquivo }` em vez de tentar `JSON.parse`; quando não é, continua lendo como erro, e `pedirComRenovacao` segue funcionando sem alteração — a renovação de token e o 403 de B-D83 são herdados de graça.
+
+### A primeira tela do projeto com espera longa, e por quê
+
+Toda outra tela do RaspyBank busca dado ao montar e mostra `<p className="carregando">Carregando…</p>` por um instante — o padrão de `useCarregar`. A T-10 não usa esse gancho: nada acontece até a pessoa escolher a faixa e clicar, e a espera depois do clique pode chegar a alguns segundos, porque o arquivo é gerado na hora (B-D116 recusou a fila que existiria só para não deixar essa espera sem explicação).
+
+O estado de carregamento é a peça que ficou no lugar da fila, não um enfeite:
+
+- guarda a **faixa que está sendo gerada** (não um booleano), para a frase de espera continuar certa mesmo se a pessoa mexer nos campos enquanto o arquivo vem;
+- cronometra os segundos, com um relógio que nasce e morre com a geração;
+- a partir de 15 segundos, muda a frase para dizer que demorar é normal — sem trocar de estado para "falhou";
+- desabilita o botão de baixar enquanto roda, e distingue "demorando" de "falha de rede" (a string fixa `'Servidor indisponível.'` de `useCarregar.js` seria, aqui, indistinguível de "travou", que é o problema que a fila resolvia e que este estado resolve sem ela).
+
+As duas frases do teto de 12 meses (§4s, `api.md` §6c) são cópia literal do que o servidor devolve, para a recusa aparecer na hora do clique com a mesma redação que apareceria depois de uma ida e volta ao servidor — duas redações do mesmo erro fariam a pessoa achar que são dois problemas diferentes.
+
+### A única tela que atravessa ambientes
+
+O menu lateral não muda — Relatórios entra como qualquer outro item —, mas a tela em si não respeita o ambiente ativo do topo (B-D117): o arquivo traz uma aba por ambiente do usuário, porque ele é o retrato da pessoa, e não da tela aberta. É a exceção que confirma B-D111 (o escopo de toda tela segue o ambiente ativo): aqui não há escopo de tela nenhum a seguir, porque não há grade para mostrar — só um arquivo para descrever antes de existir.
 
 **Verificado em 30/07/2026:** 229 testes verdes, com dois casos novos guardando o caso que ele achou — a pessoa com os **dois** acessos vendo um plástico no ambiente dela e todos no dele — e `make web-test` verde.
 

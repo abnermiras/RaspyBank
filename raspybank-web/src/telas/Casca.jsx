@@ -21,6 +21,7 @@ const ITENS = [
   { rotulo: 'Categorias', caminho: '/categorias' },
   { rotulo: 'Contas', caminho: '/contas' },
   { rotulo: 'Cartões', caminho: '/cartoes' },
+  { rotulo: 'Relatórios', caminho: '/relatorios' },
   { rotulo: 'Perfil', caminho: '/perfil' },
 ]
 

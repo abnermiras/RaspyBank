@@ -134,7 +134,17 @@ class MigracoesTest extends IntegracaoTest {
         // V20. O nome do banco para quem recebeu um plastico (B-D112) — a conta
         // do banco e de quem abriu o cartao, e ela nao a enxerga. Devolve SO o
         // nome: nao da saldo, nem formas, nem o direito de lancar nela.
-        "app_nome_do_banco_do_cartao");
+        "app_nome_do_banco_do_cartao",
+        // V22. A quarta da familia de app_extrato_da_conta, e a UNICA sem
+        // porteiro — de proposito: os dois parametros sao datas e nao apontam
+        // para ninguem. Nao existe "peca o extrato de fulano" porque nao existe
+        // parametro que diga fulano; tudo deriva de app_usuario_id(), e sem
+        // identidade na sessao ela devolve zero linha.
+        //
+        // O impasse e o de sempre nesta familia: pol_lancamento_ambiente esconde
+        // — corretamente — a linha alheia de uma conta ou plastico dividido, e o
+        // arquivo precisa dela para fechar com a T-05 (B-D117).
+        "app_extrato_completo");
 
     private static final List<String> TABELAS_COM_RLS = List.of(
         // Fundacao (V3)

@@ -68,8 +68,13 @@ public class FormaPagamentoControlador {
          * endpoint: duas listas de nomes que precisam concordar acabam
          * discordando. A tabela {@code forma_pagamento} guarda os mesmos textos
          * para quem consultar o banco direto.</p>
+         *
+         * <p><b>Publico pelo mesmo motivo.</b> O extrato em {@code .xlsx} da
+         * T-10 precisa do rotulo na coluna "Pago com"
+         * ({@code ExtratoCompletoMontador}), e uma copia da lista la seria a
+         * terceira — a que envelhece na proxima forma nova.</p>
          */
-        private static String nomeDe(FormaPagamento f) {
+        public static String nomeDe(FormaPagamento f) {
             return switch (f) {
                 case DEBITO            -> "Débito";
                 case PIX               -> "Pix";

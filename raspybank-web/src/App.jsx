@@ -8,6 +8,7 @@ import Perfil from './telas/Perfil.jsx'
 import Entrada from './telas/Entrada.jsx'
 import Lancamentos from './telas/Lancamentos.jsx'
 import MapaDeGastos from './telas/MapaDeGastos.jsx'
+import Relatorios from './telas/Relatorios.jsx'
 
 // =============================================================================
 // Rotas
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="/categorias" element={<Categorias />} />
               <Route path="/contas" element={<Contas />} />
               <Route path="/cartoes" element={<Cartoes />} />
+              <Route path="/relatorios" element={<Relatorios />} />
               <Route path="/perfil" element={<Perfil />} />
               <Route index element={<Navigate to="/mapa" replace />} />
             </Route>

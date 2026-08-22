@@ -101,6 +101,15 @@
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
         </dependency>
 
+        <!-- Escrita do .xlsx da T-10. Mora aqui, no módulo de montagem, e não
+             num módulo próprio: sem fila não há ciclo de vida de relatório, e
+             um módulo contendo só um escritor seria camada técnica — que é
+             exatamente o que a divisão por contexto de negócio evita. -->
+        <dependency>
+            <groupId>org.dhatim</groupId>
+            <artifactId>fastexcel</artifactId>
+        </dependency>
+
         <!-- ArchUnit: os testes que policiam as fronteiras entre módulos -->
         <dependency>
             <groupId>com.tngtech.archunit</groupId>
